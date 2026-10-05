@@ -63,27 +63,22 @@ fun GlassCard(
     } else Modifier
 
     val hasCustomBg = LocalHasCustomBackground.current
-    // 真实玻璃：Backdrop 折射；降级时用半透明（无 Backdrop 的极端情况）
+    // 通透玻璃：轻模糊 + 高透明，像真玻璃一样能看清背后内容
+    // 自定义背景时模糊更轻（8dp），默认背景时稍重（16dp）保证层次
+    val lightBlurPx = with(density) { (if (hasCustomBg) 8.dp else 16.dp).toPx() }
     val glassMod = if (backdrop != null) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
             shape = { shape },
             effects = {
-                blur(blurPx)
-                // TODO: lens() 导致 CI 构建失败，暂时禁用，待定位原因后恢复
-                // 轻折射 + 边缘色散：iOS26 式厚玻璃质感（卡片面积大，参数保守）
-                // lens(
-                //     refractionHeight = with(density) { 10.dp.toPx() },
-                //     refractionAmount = with(density) { 14.dp.toPx() },
-                //     chromaticAberration = true
-                // )
+                blur(lightBlurPx)
             }
         ).then(
-            // 自定义背景图时加一层半透明遮罩，保证文字可读性
-            if (hasCustomBg) Modifier.background(
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+            // 极淡的色调层：只为文字可读性做最低限度的衬底，不遮挡背景
+            Modifier.background(
+                MaterialTheme.colorScheme.surface.copy(alpha = if (hasCustomBg) 0.18f else 0.35f),
                 shape
-            ) else Modifier
+            )
         )
     } else {
         Modifier.background(
