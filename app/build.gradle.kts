@@ -1,3 +1,4 @@
+import java.util.Base64
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
@@ -109,7 +110,7 @@ tasks.register("decodeLauncherIcon") {
         val b64File = rootProject.file("tools/icon/foreground.jpg.b64")
         val outFile = file("src/main/res/drawable/ic_launcher_foreground_img.jpg")
         if (b64File.exists()) {
-            val bytes = java.util.Base64.getDecoder().decode(b64File.readText().trim())
+            val bytes = Base64.getDecoder().decode(b64File.readText().trim())
             outFile.parentFile.mkdirs()
             outFile.writeBytes(bytes)
             println("青栅图标已还原: ${bytes.size} bytes -> ${outFile.path}")
