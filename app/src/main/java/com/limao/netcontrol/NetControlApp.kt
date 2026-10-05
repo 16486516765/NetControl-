@@ -60,16 +60,11 @@ class NetControlApp : Application() {
                 val sw = StringWriter()
                 e.printStackTrace(PrintWriter(sw))
                 val sb = StringBuilder()
-                sb.append("MANUFACTURER=").append(Build.MANUFACTURER).append('
-')
-                sb.append("MODEL=").append(Build.MODEL).append('
-')
-                sb.append("API=").append(Build.VERSION.SDK_INT).append('
-')
-                sb.append("THREAD=").append(thread.name).append('
-')
-                sb.append("STACK=
-").append(sw.toString())
+                sb.append("MANUFACTURER=").append(Build.MANUFACTURER).append('\n')
+                sb.append("MODEL=").append(Build.MODEL).append('\n')
+                sb.append("API=").append(Build.VERSION.SDK_INT).append('\n')
+                sb.append("THREAD=").append(thread.name).append('\n')
+                sb.append("STACK=\n").append(sw.toString())
                 crashFile.writeText(sb.toString())
             } catch (_: Exception) { }
             if (prev != null) prev.uncaughtException(thread, e)
