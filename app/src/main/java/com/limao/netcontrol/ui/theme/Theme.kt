@@ -17,21 +17,23 @@ private val LightColors = lightColorScheme(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF4D94FF),
+    primary = Color(0xFF0A84FF),
     onPrimary = Color.White,
-    surface = Color(0xFF121212).copy(alpha = 0.55f),
-    onSurface = Color(0xFFF2F4F7),
-    onSurfaceVariant = Color(0xFF98A2B3),
-    error = Color(0xFFFF6B61)
+    background = Color.Black,
+    surface = Color(0xFF1C1C1E),
+    onSurface = Color.White,
+    onSurfaceVariant = Color(0xFFAEAEB2),
+    error = Color(0xFFFF453A)
 )
 
 @Composable
 fun NetControlTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    // 纯黑背景，永远用深色高对比主题
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = DarkColors,
         content = content
     )
 }
