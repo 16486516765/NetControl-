@@ -69,6 +69,13 @@ fun GlassCard(
             shape = { shape },
             effects = {
                 blur(blurPx)
+                // TODO: lens() 导致 CI 构建失败，暂时禁用，待定位原因后恢复
+                // 轻折射 + 边缘色散：iOS26 式厚玻璃质感（卡片面积大，参数保守）
+                // lens(
+                //     refractionHeight = with(density) { 10.dp.toPx() },
+                //     refractionAmount = with(density) { 14.dp.toPx() },
+                //     chromaticAberration = true
+                // )
             }
         )
     } else {
