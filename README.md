@@ -1,18 +1,17 @@
 # 联网控制器（NetControl）
 
 一个真正可用的 Android 应用联网控制器：按应用控制是否允许联网，
-支持 Root 与 Shizuku 两种特权模式，UI 基于
-[Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)
-（Backdrop 2.0.1）构建 Liquid Glass 风格。
+支持 Root 与 Shizuku 两种特权模式，UI 基于 Material 3 构建，
+纯黑背景，深色高对比。
 
 ## 功能
 
 - 已安装应用列表（图标 / 名称 / 包名 / UID / 实际联网状态）
 - 应用搜索（名称、包名）、排序（名称 / 包名 / 状态）、过滤（系统应用 / 仅被限制）
 - 单个应用联网开关：真正通过 iptables 按 UID 写入系统规则，并校验执行结果
-- Wi-Fi / 移动数据分组控制：仅当设备可可靠识别两类接口时启用，
-  否则如实显示「当前控制模式无法可靠区分 Wi-Fi 与移动数据」
-- 规则持久化（DataStore）；启动时对比系统实际规则，丢失则重新应用
+- Wi-Fi / 移动数据独立控制：统一联网、Wi-Fi、移动数据三个开关可分别控制；
+  若设备无法可靠区分两类接口，会如实提示，分开控制效果以实际为准
+- 规则持久化（SharedPreferences 单 JSON 存储）；启动时对比系统实际规则，丢失则重新应用
 - 开机自动恢复规则（可在设置中开关）
 - 应用卸载自动清理规则；应用更新（UID 变化）自动重新应用
 - 特权优先级：Root > Shizuku > 无特权；无特权时绝不伪造“控制成功”
@@ -46,14 +45,13 @@ APK 输出：`app/build/outputs/apk/debug/`
 
 ## 版本
 
-- applicationId：`com.limao.netcontrol`
+- applicationId：`com.limao.netcontrol.debug`（debug）/ `com.limao.netcontrol`（release）
 - versionName：`1.0.0`（versionCode 1）
-- minSdk 26（Android 8.0）/ targetSdk 34 / compileSdk 34
-- Kotlin 2.0.21 / AGP 8.5.2 / Gradle 8.7
-- Compose（BOM 2026.08.00，compose-ui 1.12.0）/ Material3 1.4.0
-- Backdrop（AndroidLiquidGlass）2.0.1 / shapes 1.2.1
+- minSdk 26（Android 8.0）/ targetSdk 36 / compileSdk 36
+- Kotlin 2.4.10 / AGP 8.5.2 / Gradle 8.7
+- Compose 1.7.8 / Material3 1.3.1
+- Material Design Icons（material-icons-core / extended）
 - Shizuku api/provider 13.1.5
-- DataStore Preferences 1.1.7
 
 ## 隐私
 
