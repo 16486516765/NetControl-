@@ -1,5 +1,6 @@
 package com.limao.netcontrol
 
+import android.app.Application
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -58,10 +59,17 @@ sealed interface Screen {
 
 class MainActivity : ComponentActivity() {
 
-    private val mainViewModel: MainViewModel by viewModels()
-    private val appListViewModel: AppListViewModel by viewModels()
-    private val rulesViewModel: RulesViewModel by viewModels()
-    private val settingsViewModel: SettingsViewModel by viewModels()
+    /** 所有 AndroidViewModel 子类共用的 Factory（传入 Application，避免默认工厂无参构造崩溃）。 */
+    private val appVmFactory = object : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            modelClass.getConstructor(Application::class.java).newInstance(application) as T
+    }
+
+    private val mainViewModel: MainViewModel by viewModels { appVmFactory }
+    private val appListViewModel: AppListViewModel by viewModels { appVmFactory }
+    private val rulesViewModel: RulesViewModel by viewModels { appVmFactory }
+    private val settingsViewModel: SettingsViewModel by viewModels { appVmFactory }
 
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
