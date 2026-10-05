@@ -91,6 +91,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 诊断模式：上次崩溃过则直接退出，由 CrashReportActivity 展示日志。
+        if ((application as NetControlApp).crashedLastRun) { finish(); return }
         enableEdgeToEdge()
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         Shizuku.addBinderReceivedListener(binderReceivedListener)
