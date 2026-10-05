@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 护盾：象征网络防护 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,18 L88,31 V54 C88,75 72,90 54,96 C36,90 20,75 20,54 V31 Z" />
+    <!-- 对勾：象征控制生效 -->
+    <path
+        android:fillColor="#0A84FF"
+        android:pathData="M49,68 L40,59 L44,55 L49,60 L64,45 L68,49 Z" />
+</vector>
