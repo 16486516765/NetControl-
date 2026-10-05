@@ -76,17 +76,7 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
-    // 真实 Liquid Glass：Kyant0/AndroidLiquidGlass Backdrop（当前版 2.0.1）
-    // 元数据已降级到 Kotlin 2.0（仅调用稳定 API）；排除 JetBrains Compose 传递依赖
-    implementation("io.github.kyant0:backdrop:2.0.1") {
-        exclude(group = "org.jetbrains.compose.foundation")
-        exclude(group = "org.jetbrains.compose.ui")
-        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
-    }
-    implementation("io.github.kyant0:shapes:1.2.1") {
-        exclude(group = "org.jetbrains.compose.ui")
-        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
-    }
+    // 纯 Material 3，不再使用玻璃拟态库
 }
 
 // Kyant0 LiquidGlass 的 AAR 元数据声明 minCompileSdk=37，但 Google 尚未公开发布
