@@ -26,6 +26,8 @@ abstract class IptablesController(
     private var ip6tablesBin: String? = null
     private var binariesResolved = false
     private val resolveMutex = Mutex()
+    /** 探测失败时的详细信息，用于报错时告诉用户真实原因 */
+    private var resolveError: String? = null
 
     private var transportCache: Pair<Long, TransportInfo>? = null
 
@@ -42,11 +44,21 @@ abstract class IptablesController(
         if (binariesResolved) return iptablesBin != null
         try {
             // 注意：探测时不用 -w，老版本 iptables 可能不支持该参数导致误判
-            iptablesBin = listOf("iptables", "/system/bin/iptables").firstOrNull { bin ->
-                shell.exec("$bin --version").success
+            var lastErr = ""
+            // 多路径探测：有些设备的 su/sh 环境 PATH 受限，绝对路径兜底
+            iptablesBin = listOf(
+                "iptables",
+                "/system/bin/iptables",
+                "/vendor/bin/iptables",
+                "/sbin/iptables"
+            ).firstOrNull { bin ->
+                val r = shell.exec("$bin --version", timeoutMs = 10000)
+                if (!r.success) lastErr = "[$bin] exit=${r.exitCode} err=${r.stderr.take(200)}"
+                r.success
             }
             if (iptablesBin == null) {
-                Log.e(logTag, "iptables binary not found")
+                resolveError = if (lastErr.isNotEmpty()) lastErr else "iptables binary not found in PATH"
+                Log.e(logTag, "iptables resolve failed: $resolveError")
                 return false
             }
             ip6tablesBin = listOf("ip6tables", "/system/bin/ip6tables").firstOrNull { bin ->
@@ -66,6 +78,12 @@ abstract class IptablesController(
     private suspend fun binsStrict(): List<String> {
         if (!resolveBinaries()) return emptyList()
         return listOfNotNull(iptablesBin)
+    }
+
+    /** 给用户看的真实失败原因，而不是笼统的"不可用" */
+    protected fun iptablesUnavailableReason(): String {
+        return resolveError?.let { "iptables 不可用：$it" }
+            ?: "iptables 不可用，无法执行网络控制"
     }
 
     private suspend fun binsBestEffort(): List<String> {
@@ -111,7 +129,7 @@ abstract class IptablesController(
     override suspend fun blockApp(uid: Int): Result<Unit> {
         val bins = binsStrict()
         if (bins.isEmpty()) {
-            return Result.failure(IllegalStateException("iptables 不可用，无法执行网络控制"))
+            return Result.failure(IllegalStateException(iptablesUnavailableReason()))
         }
         // 一、1 优化：合成单个脚本，一次 su 完成所有操作，而非每个 -C/-I 都起进程
         val script = buildString {
@@ -139,7 +157,7 @@ abstract class IptablesController(
     override suspend fun unblockApp(uid: Int): Result<Unit> {
         val bins = binsStrict()
         if (bins.isEmpty()) {
-            return Result.failure(IllegalStateException("iptables 不可用，无法解除网络限制"))
+            return Result.failure(IllegalStateException(iptablesUnavailableReason() + "，无法解除网络限制"))
         }
         // 一、1 优化：单脚本循环删除，最多 10 次，避免逐条起进程
         val script = buildString {
