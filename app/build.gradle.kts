@@ -112,7 +112,7 @@ tasks.register("decodeLauncherIcon") {
             val bytes = java.util.Base64.getDecoder().decode(b64File.readText().trim())
             outFile.parentFile.mkdirs()
             outFile.writeBytes(bytes)
-            println("青栅图标已还原: ${bytes.size} bytes")
+            println("青栅图标已还原: ${bytes.size} bytes -> ${outFile.path}")
         } else {
             println("警告: 未找到图标源文件 tools/icon/foreground.jpg.b64")
         }
