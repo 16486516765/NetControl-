@@ -65,3 +65,4 @@ APK 输出：`app/build/outputs/apk/debug/`
 - 真机上的 Root / Shizuku 网络控制行为需在真实设备验证
 - Wi-Fi / 移动数据分组控制依赖设备接口命名（wlan*/rmnet* 等），
   无法识别时自动降级为统一控制并如实提示
+
