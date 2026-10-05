@@ -101,3 +101,21 @@ tasks.configureEach {
             jvmTarget.set(JvmTarget.JVM_17)
         }
     }
+
+// 应用图标：从仓库 base64 文本还原动漫前景图（GitHub 集成无法直接推送二进制）
+// 每次构建前自动解码到 res/drawable，不污染版本库
+tasks.register("decodeLauncherIcon") {
+    doLast {
+        val b64File = rootProject.file("tools/icon/foreground.jpg.b64")
+        val outFile = file("src/main/res/drawable/ic_launcher_foreground_img.jpg")
+        if (b64File.exists()) {
+            val bytes = java.util.Base64.getDecoder().decode(b64File.readText().trim())
+            outFile.parentFile.mkdirs()
+            outFile.writeBytes(bytes)
+            println("青栅图标已还原: ${bytes.size} bytes")
+        } else {
+            println("警告: 未找到图标源文件 tools/icon/foreground.jpg.b64")
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn("decodeLauncherIcon") }
