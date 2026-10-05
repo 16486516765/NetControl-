@@ -103,11 +103,12 @@ fun GlassBottomBar(
             shape = { barShape },
             effects = {
                 blur(with(density) { 24.dp.toPx() })
-                lens(
-                    refractionHeight = with(density) { 18.dp.toPx() },
-                    refractionAmount = with(density) { 26.dp.toPx() },
-                    chromaticAberration = true
-                )
+                // TODO: lens() 在部分机型上触发 Size is unspecified 崩溃（backdrop 库在 size 未就绪时调用 getCornerRadii），暂时禁用
+                // lens(
+                //     refractionHeight = with(density) { 18.dp.toPx() },
+                //     refractionAmount = with(density) { 26.dp.toPx() },
+                //     chromaticAberration = true
+                // )
             }
         )
     } else {
