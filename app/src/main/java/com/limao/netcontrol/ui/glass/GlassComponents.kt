@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.vibrancy
 
 /**
  * 真实 Liquid Glass 卡片（Kyant0/AndroidLiquidGlass Backdrop 2.0.1）。
@@ -70,7 +69,6 @@ fun GlassCard(
             shape = { shape },
             effects = {
                 blur(blurPx)
-                vibrancy()
             }
         )
     } else {
@@ -186,7 +184,6 @@ fun GlassSearchBar(
             shape = { CircleShape },
             effects = {
                 blur(blurPx)
-                vibrancy()
             }
         )
     } else {

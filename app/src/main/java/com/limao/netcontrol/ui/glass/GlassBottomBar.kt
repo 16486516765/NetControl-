@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.vibrancy
 
 /** 底部导航项。 */
 data class BottomTab(
@@ -54,7 +53,6 @@ fun GlassBottomBar(
             shape = { CircleShape },
             effects = {
                 blur(blurPx)
-                vibrancy()
             }
         )
     } else {
