@@ -41,15 +41,16 @@ abstract class IptablesController(
     private suspend fun resolveBinaries(): Boolean = resolveMutex.withLock {
         if (binariesResolved) return iptablesBin != null
         try {
+            // 注意：探测时不用 -w，老版本 iptables 可能不支持该参数导致误判
             iptablesBin = listOf("iptables", "/system/bin/iptables").firstOrNull { bin ->
-                shell.exec("$bin -w --version").success
+                shell.exec("$bin --version").success
             }
             if (iptablesBin == null) {
                 Log.e(logTag, "iptables binary not found")
                 return false
             }
             ip6tablesBin = listOf("ip6tables", "/system/bin/ip6tables").firstOrNull { bin ->
-                shell.exec("$bin -w --version").success
+                shell.exec("$bin --version").success
             }
             if (ip6tablesBin == null) {
                 Log.w(logTag, "ip6tables not found, IPv6 rules will be skipped")
