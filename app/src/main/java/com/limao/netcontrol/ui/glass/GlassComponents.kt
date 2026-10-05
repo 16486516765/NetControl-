@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
 
 /**
  * 真实 Liquid Glass 卡片（Kyant0/AndroidLiquidGlass Backdrop 2.0.1）。
@@ -69,6 +70,12 @@ fun GlassCard(
             shape = { shape },
             effects = {
                 blur(blurPx)
+                // 轻折射 + 边缘色散：iOS26 式厚玻璃质感（卡片面积大，参数保守）
+                lens(
+                    refractionHeight = with(density) { 10.dp.toPx() },
+                    refractionAmount = with(density) { 14.dp.toPx() },
+                    chromaticAberration = true
+                )
             }
         )
     } else {
