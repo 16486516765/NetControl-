@@ -82,12 +82,14 @@ fun LiquidToggle(
 fun LiquidButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     accent: Color = MaterialTheme.colorScheme.primary,
     content: @Composable () -> Unit
 ) {
     Button(
         onClick = onClick,
         modifier = modifier,
+        enabled = enabled,
         colors = ButtonDefaults.buttonColors(
             containerColor = accent,
             contentColor = Color.White
@@ -124,15 +126,27 @@ fun GlassSearchBar(
     )
 }
 
-/** 状态圆点。 */
+/** 状态圆点 + 文字。 */
 @Composable
 fun StatusDot(
+    text: String,
     color: Color,
     modifier: Modifier = Modifier
 ) {
-    androidx.compose.foundation.Canvas(
-        modifier = modifier.padding(4.dp)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        drawCircle(color, radius = 6.dp.toPx())
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier.padding(4.dp)
+        ) {
+            drawCircle(color, radius = 6.dp.toPx())
+        }
+        Text(
+            text = text,
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
