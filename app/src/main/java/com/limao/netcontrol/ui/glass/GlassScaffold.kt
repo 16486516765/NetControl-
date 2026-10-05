@@ -22,6 +22,9 @@ import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
 /** 全局玻璃背景（真实 Backdrop），供所有玻璃组件折射采样。 */
 val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
+/** 是否有自定义背景图（自定义背景下卡片需要加遮罩保证可读性）。 */
+val LocalHasCustomBackground = staticCompositionLocalOf { false }
+
 /**
  * 背景绘制逻辑：默认渐变 + 装饰光斑；若用户设置了自定义背景图，
  * 则居中裁剪绘制背景图并加一层遮罩保证文字可读。
@@ -99,7 +102,10 @@ fun GlassScaffold(
         Canvas(Modifier.fillMaxSize()) {
             drawBg()
         }
-        CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
+        CompositionLocalProvider(
+            LocalGlassBackdrop provides backdrop,
+            LocalHasCustomBackground provides backgroundImage != null
+        ) {
             content()
         }
     }
