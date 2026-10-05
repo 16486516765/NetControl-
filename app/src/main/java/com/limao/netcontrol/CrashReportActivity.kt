@@ -39,7 +39,7 @@ class CrashReportActivity : Activity() {
         val body = TextView(this).apply {
             text = log
             textSize = 11f
-            isTextSelectable = true
+            textIsSelectable = true
             setPadding(16, 16, 16, 16)
         }
         scroll.addView(body)
