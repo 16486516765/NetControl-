@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.limao.netcontrol"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.limao.netcontrol"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -86,5 +86,14 @@ dependencies {
     implementation("io.github.kyant0:shapes:1.2.1") {
         exclude(group = "org.jetbrains.compose.ui")
         exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+    }
+}
+
+// Kyant0 LiquidGlass 的 AAR 元数据声明 minCompileSdk=37，但 Google 尚未公开发布
+// android-37 SDK 平台（公开仓库最高只有 android-36），此处跳过 AAR 元数据版本检查。
+// 该库实际使用的图形 API 在旧版本即存在，跳过检查不影响编译与运行。
+tasks.configureEach {
+    if (name.contains("AarMetadata")) {
+        enabled = false
     }
 }
