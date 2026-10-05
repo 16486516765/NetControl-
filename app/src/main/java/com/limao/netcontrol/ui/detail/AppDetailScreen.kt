@@ -28,12 +28,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
-import com.limao.netcontrol.platform.network.NetworkStatus
 import com.limao.netcontrol.ui.AppIcon
 import com.limao.netcontrol.ui.glass.GlassCard
 import com.limao.netcontrol.ui.glass.LiquidButton
 import com.limao.netcontrol.ui.glass.LiquidToggle
-import com.limao.netcontrol.ui.glass.StatusDot
 import com.limao.netcontrol.viewmodel.AppDetailViewModel
 import com.limao.netcontrol.viewmodel.MainViewModel
 
@@ -48,9 +46,6 @@ fun AppDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val info by detailViewModel.info.collectAsStateWithLifecycle()
-    val actualStatus by detailViewModel.actualStatus.collectAsStateWithLifecycle()
-    val actualWifi by detailViewModel.actualWifiBlocked.collectAsStateWithLifecycle()
-    val actualMobile by detailViewModel.actualMobileBlocked.collectAsStateWithLifecycle()
     val draftBlocked by detailViewModel.draftBlocked.collectAsStateWithLifecycle()
     val draftWifi by detailViewModel.draftWifi.collectAsStateWithLifecycle()
     val draftMobile by detailViewModel.draftMobile.collectAsStateWithLifecycle()
@@ -122,38 +117,6 @@ fun AppDetailScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // 当前实际状态（读系统规则）
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text(
-                "当前状态",
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(8.dp))
-            val (text, color) = when (actualStatus) {
-                NetworkStatus.ALLOWED -> "● 允许联网" to Color(0xFF34C759)
-                NetworkStatus.BLOCKED -> "● 禁止联网" to Color(0xFFFF453A)
-                NetworkStatus.WIFI_ONLY_BLOCKED -> "● 仅 Wi-Fi 被禁止" to Color(0xFFFF9F0A)
-                NetworkStatus.MOBILE_ONLY_BLOCKED -> "● 仅移动数据被禁止" to Color(0xFFFF9F0A)
-                NetworkStatus.UNKNOWN -> "● 未知（无系统权限）" to Color.Gray
-                NetworkStatus.ERROR -> "● 状态检测失败" to Color(0xFFFF453A)
-            }
-            StatusDot(text.removePrefix("● "), color)
-            if (actualWifi || actualMobile) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Wi-Fi: ${if (actualWifi) "被禁" else "允许"}，" +
-                        "移动数据: ${if (actualMobile) "被禁" else "允许"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
         // 联网控制草稿
         GlassCard(Modifier.fillMaxWidth()) {
             Text(
@@ -172,27 +135,26 @@ fun AppDetailScreen(
                     detailViewModel.updateDraft(!it, draftWifi, draftMobile)
                 }
             )
-            if (splitSupported == true) {
-                ToggleRow(
-                    label = "Wi-Fi",
-                    sub = if (draftWifi) "禁止" else "允许",
-                    checked = !draftWifi,
-                    onChange = {
-                        detailViewModel.updateDraft(draftBlocked, !it, draftMobile)
-                    }
-                )
-                ToggleRow(
-                    label = "移动数据",
-                    sub = if (draftMobile) "禁止" else "允许",
-                    checked = !draftMobile,
-                    onChange = {
-                        detailViewModel.updateDraft(draftBlocked, draftWifi, !it)
-                    }
-                )
-            } else {
+            ToggleRow(
+                label = "Wi-Fi",
+                sub = if (draftWifi) "禁止" else "允许",
+                checked = !draftWifi,
+                onChange = {
+                    detailViewModel.updateDraft(draftBlocked, !it, draftMobile)
+                }
+            )
+            ToggleRow(
+                label = "移动数据",
+                sub = if (draftMobile) "禁止" else "允许",
+                checked = !draftMobile,
+                onChange = {
+                    detailViewModel.updateDraft(draftBlocked, draftWifi, !it)
+                }
+            )
+            if (splitSupported != true) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "当前控制模式无法可靠区分 Wi-Fi 与移动数据。",
+                    "注：当前设备可能无法可靠区分 Wi-Fi 与移动数据，分开控制效果以实际为准。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
