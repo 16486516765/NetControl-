@@ -21,6 +21,7 @@ class SettingsRepository(private val context: Context) {
     private val bootRestoreKey = "boot_restore"
     private val themeModeKey = "theme_mode"
     private val pendingRestoreKey = "pending_restore"
+    private val customBackgroundKey = "custom_background_path"
 
     private fun booleanFlow(key: String): Flow<Boolean> = callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, k ->
@@ -46,6 +47,7 @@ class SettingsRepository(private val context: Context) {
     val bootRestoreFlow: Flow<Boolean> = booleanFlow(bootRestoreKey)
     val themeModeFlow: Flow<String> = stringFlow(themeModeKey, ThemeMode.SYSTEM)
     val pendingRestoreFlow: Flow<Boolean> = booleanFlow(pendingRestoreKey)
+    val customBackgroundPathFlow: Flow<String> = stringFlow(customBackgroundKey, "")
 
     suspend fun setShowSystemApps(v: Boolean) {
         prefs.edit().putBoolean(showSystemAppsKey, v).apply()
@@ -64,6 +66,9 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setPendingRestore(v: Boolean) {
         prefs.edit().putBoolean(pendingRestoreKey, v).apply()
+    }
+    suspend fun setCustomBackgroundPath(v: String) {
+        prefs.edit().putString(customBackgroundKey, v).apply()
     }
 
     suspend fun isBootRestoreEnabled(): Boolean = bootRestoreFlow.first()
