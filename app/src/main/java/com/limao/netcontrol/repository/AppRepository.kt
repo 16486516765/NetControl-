@@ -38,9 +38,9 @@ class AppRepository(private val context: Context) {
             .toList()
     }
 
-    /** 按包名取 UID（应用更新后 UID 可能变化）。 */
-    fun getUid(packageName: String): Int? {
-        return try {
+    /** 按包名取 UID（应用更新后 UID 可能变化）。IO 线程执行。 */
+    suspend fun getUid(packageName: String): Int? = withContext(Dispatchers.IO) {
+        return@withContext try {
             val ai = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.packageManager.getApplicationInfo(
                     packageName,
@@ -57,7 +57,7 @@ class AppRepository(private val context: Context) {
     }
 
     /** 是否仍已安装。 */
-    fun isInstalled(packageName: String): Boolean = getUid(packageName) != null
+    suspend fun isInstalled(packageName: String): Boolean = getUid(packageName) != null
 
     fun loadIcon(packageName: String): Drawable? {
         return try {

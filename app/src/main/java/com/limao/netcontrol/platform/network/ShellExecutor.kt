@@ -25,17 +25,28 @@ interface ShellExecutor {
 class RootShellExecutor : ShellExecutor {
     override suspend fun exec(command: String, timeoutMs: Long): ShellResult =
         withContext(Dispatchers.IO) {
+            var process: Process? = null
             try {
-                val process = ProcessBuilder("su", "-c", command)
+                process = ProcessBuilder("su", "-c", command)
                     .redirectErrorStream(false)
                     .start()
-                withTimeout(timeoutMs) {
-                    val stdout = async { process.inputStream.bufferedReader().readText() }
-                    val stderr = async { process.errorStream.bufferedReader().readText() }
-                    val code = process.waitFor()
-                    ShellResult(code, stdout.await().trim(), stderr.await().trim())
+                val p = process
+                try {
+                    withTimeout(timeoutMs) {
+                        val stdout = async { p.inputStream.bufferedReader().readText() }
+                        val stderr = async { p.errorStream.bufferedReader().readText() }
+                        val code = p.waitFor()
+                        ShellResult(code, stdout.await().trim(), stderr.await().trim())
+                    }
+                } finally {
+                    // withTimeout 不会自动杀进程，超时/取消时必须主动销毁，避免残留
+                    try { p.destroy() } catch (_: Exception) {}
+                    try {
+                        if (p.isAlive) p.destroyForcibly()
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
+                try { process?.destroyForcibly() } catch (_: Exception) {}
                 Log.e(TAG, "root exec failed: $command", e)
                 ShellResult(-1, "", e.message ?: "exception")
             }
@@ -48,20 +59,24 @@ class RootShellExecutor : ShellExecutor {
 
 /** 通过 Shizuku.newProcess 执行命令的执行器。 */
 class ShizukuShellExecutor : ShellExecutor {
+    // 反射 Method 只解析一次，避免每次 exec 都 getDeclaredMethod
+    private val newProcessMethod by lazy {
+        Shizuku::class.java.getDeclaredMethod(
+            "newProcess",
+            Array<String>::class.java,
+            Array<String>::class.java,
+            String::class.java
+        ).apply { isAccessible = true }
+    }
+
     override suspend fun exec(command: String, timeoutMs: Long): ShellResult =
         withContext(Dispatchers.IO) {
             try {
                 if (!Shizuku.pingBinder()) {
                     return@withContext ShellResult(-1, "", "Shizuku binder 不可用")
                 }
-                // Shizuku 13.1.5+ 将 newProcess 私有化，用反射调用
-                val method = Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply { isAccessible = true }
-                val process = method.invoke(
+                // Shizuku 13.1.5+ 将 newProcess 私有化，用反射调用（Method 已缓存）
+                val process = newProcessMethod.invoke(
                     null,
                     arrayOf("sh", "-c", command),
                     null,

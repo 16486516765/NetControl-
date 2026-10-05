@@ -12,13 +12,18 @@ import com.limao.netcontrol.platform.network.RuleApplier
 import com.limao.netcontrol.platform.network.UidRuleDetail
 import com.limao.netcontrol.platform.network.UnsupportedNetworkController
 import com.limao.netcontrol.repository.SettingsRepository
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** 应用列表行数据：应用信息 + 持久化规则 + 系统实际状态 + 操作态。 */
 data class AppRow(
@@ -30,6 +35,13 @@ data class AppRow(
     val operating: Boolean = false
 )
 
+/** 带预计算小写搜索字段的应用，避免每次过滤都 lowercase()。 */
+private data class SearchableApp(
+    val info: AppInfo,
+    val nameLower: String,
+    val pkgLower: String
+)
+
 class AppListViewModel(app: Application) : AndroidViewModel(app) {
 
     private val netApp = app as NetControlApp
@@ -38,13 +50,18 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
     private val ruleRepository get() = netApp.ruleRepository
     private val settings get() = netApp.settingsRepository
 
-    private val _apps = MutableStateFlow<List<AppInfo>>(emptyList())
+    private val _apps = MutableStateFlow<List<SearchableApp>>(emptyList())
     private val _ruleDetails = MutableStateFlow<Map<Int, UidRuleDetail>>(emptyMap())
     private val _isLoading = MutableStateFlow(false)
     private val _loadError = MutableStateFlow<String?>(null)
     private val _searchQuery = MutableStateFlow("")
     private val _errors = MutableStateFlow<Map<String, String>>(emptyMap())
     private val _operating = MutableStateFlow<Set<String>>(emptySet())
+    // per-UID 互斥：同一应用同时只允许一个规则操作，避免快速连点竞态
+    private val uidLocks = mutableMapOf<String, Mutex>()
+    private fun lockFor(packageName: String): Mutex = synchronized(uidLocks) {
+        uidLocks.getOrPut(packageName) { Mutex() }
+    }
 
     val isLoading = _isLoading.asStateFlow()
     val loadError = _loadError.asStateFlow()
@@ -55,13 +72,19 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope, SharingStarted.Eagerly, emptyMap()
         )
 
+    @OptIn(FlowPreview::class)
+    private val debouncedQuery = _searchQuery
+        .debounce(150)
+        .distinctUntilChanged()
+
     /** 列表行：应用 × 规则 × 系统实际状态，支持搜索/排序/过滤。 */
+    @OptIn(FlowPreview::class)
     val rows: StateFlow<List<AppRow>> = combine(
-        _apps, rules, _ruleDetails, _searchQuery, _errors, _operating,
+        _apps, rules, _ruleDetails, debouncedQuery, _errors, _operating,
         settings.showSystemAppsFlow, settings.showBlockedOnlyFlow, settings.sortModeFlow
     ) { args ->
         @Suppress("UNCHECKED_CAST")
-        val apps = args[0] as List<AppInfo>
+        val apps = args[0] as List<SearchableApp>
         val ruleMap = args[1] as Map<String, NetworkRule>
         val details = args[2] as Map<Int, UidRuleDetail>
         val query = (args[3] as String).trim().lowercase()
@@ -72,15 +95,16 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         val sortMode = args[8] as String
 
         var list = apps.asSequence()
-        if (!showSystem) list = list.filter { !it.isSystemApp }
+        if (!showSystem) list = list.filter { !it.info.isSystemApp }
         if (query.isNotEmpty()) {
+            // 用预计算的小写字段，不再每次 lowercase()
             list = list.filter {
-                it.appName.lowercase().contains(query) ||
-                    it.packageName.lowercase().contains(query)
+                it.nameLower.contains(query) || it.pkgLower.contains(query)
             }
         }
         val privileged = session.controller !is UnsupportedNetworkController
-        var rows = list.map { info ->
+        var rows = list.map { searchable ->
+            val info = searchable.info
             val detail = details[info.uid]
             val status = when {
                 !privileged -> NetworkStatus.UNKNOWN
@@ -128,7 +152,13 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             _loadError.value = null
             try {
                 val apps = appRepository.loadApps()
-                _apps.value = apps
+                _apps.value = apps.map {
+                    SearchableApp(
+                        info = it,
+                        nameLower = it.appName.lowercase(),
+                        pkgLower = it.packageName.lowercase()
+                    )
+                }
                 refreshStatuses(apps)
             } catch (e: Exception) {
                 Log.e(TAG, "load apps failed", e)
@@ -140,7 +170,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 刷新系统实际状态（一次 su 调用查全部 UID）。 */
-    fun refreshStatuses(apps: List<AppInfo> = _apps.value) {
+    fun refreshStatuses(apps: List<AppInfo> = _apps.value.map { it.info }) {
         viewModelScope.launch {
             try {
                 _ruleDetails.value = session.controller.getAllUidRules()
@@ -156,7 +186,9 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun setAppBlocked(packageName: String, blocked: Boolean) {
         viewModelScope.launch {
-            val info = _apps.value.find { it.packageName == packageName } ?: return@launch
+            val info = _apps.value.find { it.info.packageName == packageName }?.info ?: return@launch
+            // 同一 UID 串行化：快速连点时以前一次为准，不会两个 Shell 同时改规则
+            lockFor(packageName).withLock {
             _operating.value = _operating.value + packageName
             _errors.value = _errors.value - packageName
             try {
@@ -188,6 +220,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 _operating.value = _operating.value - packageName
             }
+            } // lockFor
         }
     }
 
