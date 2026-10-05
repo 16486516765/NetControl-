@@ -1,7 +1,6 @@
 package com.limao.netcontrol
 
 import android.app.Application
-import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -19,9 +18,6 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -31,8 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
@@ -149,22 +143,8 @@ class MainActivity : ComponentActivity() {
             backStack.removeLastOrNull()
         }
 
-        // 用户自定义背景（IO 线程解码，更换时自动刷新）
-        val bgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
-        val bgImage by produceState<ImageBitmap?>(null, bgPath) {
-            value = withContext(Dispatchers.IO) {
-                if (bgPath.isNotEmpty()) {
-                    try {
-                        BitmapFactory.decodeFile(bgPath)?.asImageBitmap()
-                    } catch (e: Exception) {
-                        null
-                    }
-                } else null
-            }
-        }
-
         NetControlTheme(darkTheme) {
-            GlassScaffold(darkTheme, bgImage) {
+            GlassScaffold(darkTheme) {
                 Box(Modifier.fillMaxSize()) {
                     when (val s = current) {
                         is Screen.Home -> HomeScreen(
