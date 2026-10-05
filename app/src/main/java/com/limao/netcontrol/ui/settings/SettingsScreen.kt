@@ -21,15 +21,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.limao.netcontrol.platform.network.PrivilegeManager
 import com.limao.netcontrol.repository.SettingsRepository
@@ -54,26 +53,8 @@ fun SettingsScreen(
     val bootRestore by settingsViewModel.bootRestore.collectAsStateWithLifecycle(initialValue = false)
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
     val pendingRestore by settingsViewModel.pendingRestore.collectAsStateWithLifecycle(initialValue = false)
-    val customBgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
-    val context = LocalContext.current
     var restoreMsg by remember { mutableStateOf<String?>(null) }
-
-    // 自定义背景图选择器：从相册选图，复制到内部存储
-    val bgPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                val destFile = java.io.File(context.filesDir, "custom_background.jpg")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    destFile.outputStream().use { output -> input.copyTo(output) }
-                }
-                settingsViewModel.setCustomBackgroundPath(destFile.absolutePath)
-            } catch (e: Exception) {
-                restoreMsg = "背景图设置失败：${e.message}"
-            }
-        }
-    }
+    var bgMsg by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier
@@ -216,41 +197,57 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // 自定义背景图
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "自定义背景图",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        if (customBgPath.isNotEmpty()) "已设置自定义背景" else "从相册选择图片作为背景",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LiquidButton(onClick = { bgPicker.launch("image/*") }) {
-                        Text("选择图片", color = Color.White)
-                    }
-                    if (customBgPath.isNotEmpty()) {
-                        LiquidButton(
-                            onClick = {
-                                settingsViewModel.setCustomBackgroundPath("")
-                                try { java.io.File(customBgPath).delete() } catch (_: Exception) {}
-                            },
-                            accent = Color(0xFF787880)
-                        ) {
-                            Text("清除", color = Color.White)
-                        }
+            Text(
+                "自定义背景",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            val bgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
+            val bgPicker = rememberLauncherForActivityResult(
+                ActivityResultContracts.GetContent()
+            ) { uri ->
+                if (uri != null) {
+                    settingsViewModel.importBackgroundImage(uri) { ok ->
+                        bgMsg = if (ok) "背景已更换" else "图片处理失败，请换一张试试"
                     }
                 }
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LiquidButton(onClick = { bgPicker.launch("image/*") }) {
+                    Text("选择图片", color = Color.White)
+                }
+                if (bgPath.isNotEmpty()) {
+                    LiquidButton(onClick = {
+                        settingsViewModel.clearCustomBackground()
+                        bgMsg = "已恢复默认背景"
+                    }) {
+                        Text("恢复默认", color = Color.White)
+                    }
+                }
+            }
+            if (bgPath.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "当前：已使用自定义背景",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF34C759)
+                )
+            }
+            bgMsg?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "从相册选一张图作为应用背景，玻璃折射会实时使用新背景。图片仅保存在应用内部，不会上传。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         // 关于
