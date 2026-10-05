@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
 
 /**
  * 真实 Liquid Glass 卡片（Kyant0/AndroidLiquidGlass Backdrop 2.0.1）。
@@ -63,7 +62,6 @@ fun GlassCard(
         Modifier.clickable(onClick = onClick)
     } else Modifier
 
-    val hasCustomBg = LocalHasCustomBackground.current
     // 真实玻璃：Backdrop 折射；降级时用半透明（无 Backdrop 的极端情况）
     val glassMod = if (backdrop != null) {
         Modifier.drawBackdrop(
@@ -71,19 +69,14 @@ fun GlassCard(
             shape = { shape },
             effects = {
                 blur(blurPx)
+                // TODO: lens() 导致 CI 构建失败，暂时禁用，待定位原因后恢复
                 // 轻折射 + 边缘色散：iOS26 式厚玻璃质感（卡片面积大，参数保守）
-                lens(
-                    refractionHeight = with(density) { 10.dp.toPx() },
-                    refractionAmount = with(density) { 14.dp.toPx() },
-                    chromaticAberration = true
-                )
+                // lens(
+                //     refractionHeight = with(density) { 10.dp.toPx() },
+                //     refractionAmount = with(density) { 14.dp.toPx() },
+                //     chromaticAberration = true
+                // )
             }
-        ).then(
-            // 自定义背景图时加一层半透明遮罩，保证文字可读性
-            if (hasCustomBg) Modifier.background(
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                shape
-            ) else Modifier
         )
     } else {
         Modifier.background(
