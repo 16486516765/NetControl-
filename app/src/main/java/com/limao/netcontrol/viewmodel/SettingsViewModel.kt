@@ -19,6 +19,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val bootRestore = settings.bootRestoreFlow
     val themeMode = settings.themeModeFlow
     val pendingRestore = settings.pendingRestoreFlow
+    val customBackgroundPath = settings.customBackgroundPathFlow
     val privilege = session.privilege
 
     fun setShowSystemApps(v: Boolean) = viewModelScope.launch {
@@ -30,6 +31,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setSortMode(v: String) = viewModelScope.launch { settings.setSortMode(v) }
     fun setBootRestore(v: Boolean) = viewModelScope.launch { settings.setBootRestore(v) }
     fun setThemeMode(v: String) = viewModelScope.launch { settings.setThemeMode(v) }
+    fun setCustomBackgroundPath(v: String) = viewModelScope.launch { settings.setCustomBackgroundPath(v) }
 
     fun redetectPrivilege() {
         session.clearPrivilegeCache()

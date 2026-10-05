@@ -21,6 +21,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,7 +54,26 @@ fun SettingsScreen(
     val bootRestore by settingsViewModel.bootRestore.collectAsStateWithLifecycle(initialValue = false)
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
     val pendingRestore by settingsViewModel.pendingRestore.collectAsStateWithLifecycle(initialValue = false)
+    val customBgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
+    val context = LocalContext.current
     var restoreMsg by remember { mutableStateOf<String?>(null) }
+
+    // 自定义背景图选择器：从相册选图，复制到内部存储
+    val bgPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val destFile = java.io.File(context.filesDir, "custom_background.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    destFile.outputStream().use { output -> input.copyTo(output) }
+                }
+                settingsViewModel.setCustomBackgroundPath(destFile.absolutePath)
+            } catch (e: Exception) {
+                restoreMsg = "背景图设置失败：${e.message}"
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -191,6 +213,42 @@ fun SettingsScreen(
                 }
                 SortChip("深色", themeMode == SettingsRepository.ThemeMode.DARK) {
                     settingsViewModel.setThemeMode(SettingsRepository.ThemeMode.DARK)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            // 自定义背景图
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "自定义背景图",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        if (customBgPath.isNotEmpty()) "已设置自定义背景" else "从相册选择图片作为背景",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LiquidButton(onClick = { bgPicker.launch("image/*") }) {
+                        Text("选择图片", color = Color.White)
+                    }
+                    if (customBgPath.isNotEmpty()) {
+                        LiquidButton(
+                            onClick = {
+                                settingsViewModel.setCustomBackgroundPath("")
+                                try { java.io.File(customBgPath).delete() } catch (_: Exception) {}
+                            },
+                            accent = Color(0xFF787880)
+                        ) {
+                            Text("清除", color = Color.White)
+                        }
+                    }
                 }
             }
         }
