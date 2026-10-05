@@ -62,6 +62,7 @@ fun GlassCard(
         Modifier.clickable(onClick = onClick)
     } else Modifier
 
+    val hasCustomBg = LocalHasCustomBackground.current
     // 真实玻璃：Backdrop 折射；降级时用半透明（无 Backdrop 的极端情况）
     val glassMod = if (backdrop != null) {
         Modifier.drawBackdrop(
@@ -77,6 +78,12 @@ fun GlassCard(
                 //     chromaticAberration = true
                 // )
             }
+        ).then(
+            // 自定义背景图时加一层半透明遮罩，保证文字可读性
+            if (hasCustomBg) Modifier.background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                shape
+            ) else Modifier
         )
     } else {
         Modifier.background(

@@ -23,6 +23,9 @@ import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
 /** 全局玻璃背景（真实 Backdrop），供所有玻璃组件折射采样。 */
 val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
+/** 是否有自定义背景图（自定义背景下卡片需要加遮罩保证可读性）。 */
+val LocalHasCustomBackground = staticCompositionLocalOf { false }
+
 /**
  * 背景绘制逻辑。
  * - 有自定义背景图时：绘制图片（居中裁剪铺满），玻璃折射实时跟随图片内容。
@@ -47,8 +50,7 @@ private fun glassBackgroundDraw(
             dstOffset = androidx.compose.ui.unit.IntOffset(dx.toInt(), dy.toInt()),
             dstSize = androidx.compose.ui.unit.IntSize(dw.toInt(), dh.toInt())
         )
-        // 图片上加一层半透明遮罩，保证文字可读性
-        drawRect(Color.Black.copy(alpha = if (darkTheme) 0.35f else 0.15f))
+        // 不在这里加遮罩，保持图片清晰；可读性由 GlassCard 的遮罩层保证
     } else {
         val colors = if (darkTheme) {
             listOf(Color(0xFF070B1D), Color(0xFF191238), Color(0xFF070B1D))
@@ -106,7 +108,10 @@ fun GlassScaffold(
         Canvas(Modifier.fillMaxSize()) {
             glassBackgroundDraw(darkTheme, customImage)()
         }
-        CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
+        CompositionLocalProvider(
+            LocalGlassBackdrop provides backdrop,
+            LocalHasCustomBackground provides customImage != null
+        ) {
             content()
         }
     }
