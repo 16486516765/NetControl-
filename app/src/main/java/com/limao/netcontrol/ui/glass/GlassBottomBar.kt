@@ -123,11 +123,11 @@ fun GlassBottomBar(
         Box(
             Modifier
                 .fillMaxWidth()
+                .height(barHeight)
                 .onSizeChanged { barWidthPx = it.width }
                 .then(glassMod)
                 .border(1.dp, Color.White.copy(alpha = 0.28f), barShape)
                 .clip(barShape)
-                .height(barHeight)
                 .pointerInput(tabs.size) {
                     detectTapGestures(
                         onPress = { offset ->
