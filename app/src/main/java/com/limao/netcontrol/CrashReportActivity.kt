@@ -19,16 +19,18 @@ class CrashReportActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val log = try {
+        val log: String = try {
             File(filesDir, "crash.log").readText()
-        } catch (_: Exception) { "(无法读取崩溃日志)" }
+        } catch (e: Exception) {
+            "(无法读取崩溃日志)"
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 48, 32, 32)
         }
         val title = TextView(this).apply {
-            text = "NetControl 启动时崩溃了\n把下面的日志发给开发者即可定位问题"
+            text = "NetControl 启动时崩溃了，把下面的日志发给开发者即可定位问题"
             textSize = 16f
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, 24)
