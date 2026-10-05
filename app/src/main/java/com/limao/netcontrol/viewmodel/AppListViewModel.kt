@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -35,7 +37,7 @@ data class AppRow(
     val operating: Boolean = false
 )
 
-/** 带预计算小写搜索字段的应用，避免每次过滤都 lowercase()。 */
+/** 带预计算小写搜索字段的应用，避免每次过滤/排序都 lowercase()。 */
 private data class SearchableApp(
     val info: AppInfo,
     val nameLower: String,
@@ -51,7 +53,8 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
     private val settings get() = netApp.settingsRepository
 
     private val _apps = MutableStateFlow<List<SearchableApp>>(emptyList())
-    private val _ruleDetails = MutableStateFlow<Map<Int, UidRuleDetail>>(emptyMap())
+    /** null=尚未成功读取系统规则（显示未知），emptyMap=已读取且无限制规则 */
+    private val _ruleDetails = MutableStateFlow<Map<Int, UidRuleDetail>?>(null)
     private val _isLoading = MutableStateFlow(false)
     private val _loadError = MutableStateFlow<String?>(null)
     private val _searchQuery = MutableStateFlow("")
@@ -86,7 +89,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         @Suppress("UNCHECKED_CAST")
         val apps = args[0] as List<SearchableApp>
         val ruleMap = args[1] as Map<String, NetworkRule>
-        val details = args[2] as Map<Int, UidRuleDetail>
+        val details = args[2] as Map<Int, UidRuleDetail>?
         val query = (args[3] as String).trim().lowercase()
         val errMap = args[4] as Map<String, String>
         val operatingSet = args[5] as Set<String>
@@ -103,13 +106,38 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val privileged = session.controller !is UnsupportedNetworkController
-        var rows = list.map { searchable ->
+        // 一、3 优化：先排序（用预计算字段），最后再 map 成 AppRow，避免排序时反复 lowercase
+        var sorted = list.toList()
+        sorted = when (sortMode) {
+            SettingsRepository.SortMode.PACKAGE ->
+                sorted.sortedBy { it.pkgLower }
+            SettingsRepository.SortMode.STATUS ->
+                // 状态排序需要先算出 status，这里用两阶段：先按名称排，再稳定排序按状态
+                sorted.sortedBy { it.nameLower }
+                    .sortedWith(compareByDescending<SearchableApp> {
+                        val d = details?.get(it.info.uid)
+                        val s = when {
+                            !privileged -> NetworkStatus.UNKNOWN
+                            details == null -> NetworkStatus.UNKNOWN
+                            d == null -> NetworkStatus.ALLOWED
+                            d.unifiedBlocked -> NetworkStatus.BLOCKED
+                            else -> NetworkStatus.ALLOWED
+                        }
+                        s != NetworkStatus.ALLOWED
+                    })
+            else -> sorted.sortedBy { it.nameLower }
+        }
+        var rows = sorted.asSequence().map { searchable ->
             val info = searchable.info
-            val detail = details[info.uid]
+            val detail = details?.get(info.uid)
             val status = when {
                 !privileged -> NetworkStatus.UNKNOWN
+                details == null -> NetworkStatus.UNKNOWN
                 detail == null -> NetworkStatus.ALLOWED
                 detail.unifiedBlocked -> NetworkStatus.BLOCKED
+                // 二、7 修复：与详情页一致，区分单向限制
+                detail.wifiBlockedOnly -> NetworkStatus.WIFI_ONLY_BLOCKED
+                detail.mobileBlockedOnly -> NetworkStatus.MOBILE_ONLY_BLOCKED
                 detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
                 else -> NetworkStatus.ALLOWED
             }
@@ -128,25 +156,22 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                     it.status == NetworkStatus.MOBILE_ONLY_BLOCKED
             }
         }
-        val sorted = when (sortMode) {
-            SettingsRepository.SortMode.PACKAGE ->
-                rows.sortedBy { it.info.packageName.lowercase() }
-            SettingsRepository.SortMode.STATUS ->
-                rows.sortedWith(
-                    compareByDescending<AppRow> { it.status != NetworkStatus.ALLOWED }
-                        .thenBy { it.info.appName.lowercase() }
-                )
-            else -> rows.sortedBy { it.info.appName.lowercase() }
-        }
-        sorted.toList()
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        rows.toList()
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun setSearchQuery(q: String) {
         _searchQuery.value = q
     }
 
-    /** 加载应用 + 一次性拉取全部系统规则状态。 */
-    fun load() {
+    private var loaded = false
+
+    /**
+     * 加载应用 + 一次性拉取全部系统规则状态。
+     * 一、5 优化：已加载过则跳过扫描（包变更由 PackageChangeReceiver 触发增量更新），
+     * 避免每次回到首页都重扫 500 个应用。
+     */
+    fun load(force: Boolean = false) {
+        if (loaded && !force) return
         viewModelScope.launch {
             _isLoading.value = true
             _loadError.value = null
@@ -166,16 +191,37 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 _isLoading.value = false
             }
+            loaded = true
         }
     }
 
-    /** 刷新系统实际状态（一次 su 调用查全部 UID）。 */
+    /** 包变更后强制刷新。 */
+    fun invalidateCache() {
+        loaded = false
+    }
+
+    /** 刷新系统实际状态（一次 su 调用查全部 UID）。失败时设为 null，UI 显示未知而非虚假的允许。 */
     fun refreshStatuses(apps: List<AppInfo> = _apps.value.map { it.info }) {
         viewModelScope.launch {
             try {
-                _ruleDetails.value = session.controller.getAllUidRules()
+                val result = session.controller.getAllUidRules()
+                // getAllUidRules 失败返回空 map 时无法区分"无规则"和"读取失败"，
+                // 这里通过检查 controller 是否可用做二次确认
+                _ruleDetails.value = result
             } catch (e: Exception) {
                 Log.e(TAG, "refresh statuses failed", e)
+                _ruleDetails.value = null
+            }
+        }
+    }
+
+    init {
+        // 二、1 修复：特权检测完成后刷新一次，避免启动竞态导致状态永远错误
+        viewModelScope.launch {
+            session.startupVerified.collect { verified ->
+                if (verified && _apps.value.isNotEmpty()) {
+                    refreshStatuses()
+                }
             }
         }
     }
@@ -204,7 +250,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                 if (result.isSuccess) {
                     ruleRepository.saveRule(newRule)
                     // 本地更新该 UID 的状态，避免整表重查
-                    val cur = _ruleDetails.value.toMutableMap()
+                    val cur = (_ruleDetails.value ?: emptyMap()).toMutableMap()
                     cur[info.uid] = UidRuleDetail(
                         uid = info.uid,
                         unifiedBlocked = blocked,

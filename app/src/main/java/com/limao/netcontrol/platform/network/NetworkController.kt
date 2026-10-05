@@ -88,4 +88,17 @@ data class UidRuleDetail(
     val ifaces: Set<String>
 ) {
     val hasAnyRule: Boolean get() = unifiedBlocked || ifaces.isNotEmpty()
+
+    /** 按接口名前缀判断（与 IptablesController.detectTransports 的分类逻辑一致）。 */
+    private fun isWifiIface(n: String) =
+        n.startsWith("wlan") || n.startsWith("wlx") || n == "wifi0"
+    private fun isMobileIface(n: String) =
+        listOf("rmnet", "ccmni", "pdp", "wwan", "v4-rmnet").any { n.startsWith(it) }
+
+    val wifiBlockedOnly: Boolean get() =
+        !unifiedBlocked && ifaces.isNotEmpty() &&
+            ifaces.all { isWifiIface(it) }
+    val mobileBlockedOnly: Boolean get() =
+        !unifiedBlocked && ifaces.isNotEmpty() &&
+            ifaces.all { isMobileIface(it) }
 }

@@ -196,58 +196,6 @@ fun SettingsScreen(
                     settingsViewModel.setThemeMode(SettingsRepository.ThemeMode.DARK)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "自定义背景",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            val bgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
-            val bgPicker = rememberLauncherForActivityResult(
-                ActivityResultContracts.GetContent()
-            ) { uri ->
-                if (uri != null) {
-                    settingsViewModel.importBackgroundImage(uri) { ok ->
-                        bgMsg = if (ok) "背景已更换" else "图片处理失败，请换一张试试"
-                    }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LiquidButton(onClick = { bgPicker.launch("image/*") }) {
-                    Text("选择图片", color = Color.White)
-                }
-                if (bgPath.isNotEmpty()) {
-                    LiquidButton(onClick = {
-                        settingsViewModel.clearCustomBackground()
-                        bgMsg = "已恢复默认背景"
-                    }) {
-                        Text("恢复默认", color = Color.White)
-                    }
-                }
-            }
-            if (bgPath.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "当前：已使用自定义背景",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF34C759)
-                )
-            }
-            bgMsg?.let {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "从相册选一张图作为应用背景，玻璃折射会实时使用新背景。图片仅保存在应用内部，不会上传。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
 
         // 关于
@@ -255,7 +203,7 @@ fun SettingsScreen(
             AboutRow("应用名称", "青栅")
             AboutRow("版本号", "1.0.0 (1)")
             AboutRow("包名", "com.limao.netcontrol")
-            AboutRow("UI 驱动", "Kyant0/AndroidLiquidGlass 2.0.1")
+            AboutRow("UI 驱动", "Material 3")
             AboutRow("网络控制", "iptables（Root / Shizuku）")
             Spacer(Modifier.height(4.dp))
             Text(

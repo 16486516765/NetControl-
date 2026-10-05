@@ -31,24 +31,25 @@ class RootShellExecutor : ShellExecutor {
                     .redirectErrorStream(false)
                     .start()
                 val p = process
-                try {
-                    withTimeout(timeoutMs) {
-                        val stdout = async { p.inputStream.bufferedReader().readText() }
-                        val stderr = async { p.errorStream.bufferedReader().readText() }
-                        val code = p.waitFor()
-                        ShellResult(code, stdout.await().trim(), stderr.await().trim())
-                    }
-                } finally {
-                    // withTimeout 不会自动杀进程，超时/取消时必须主动销毁，避免残留
-                    try { p.destroy() } catch (_: Exception) {}
-                    try {
-                        if (p.isAlive) p.destroyForcibly()
-                    } catch (_: Exception) {}
+                // 二、5 修复：用 waitFor(timeout) 实现真正的超时。
+                // withTimeout 包住阻塞的 readText()/waitFor() 时，协程无法在挂起点取消，
+                // su 授权弹窗无人点会一直卡住。用带超时的 waitFor，超时后强制杀进程。
+                val finished = p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (!finished) {
+                    try { p.destroyForcibly() } catch (_: Exception) {}
+                    p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+                    return@withContext ShellResult(-1, "", "timeout after ${timeoutMs}ms")
                 }
+                val stdout = try { p.inputStream.bufferedReader().readText() } catch (_: Exception) { "" }
+                val stderr = try { p.errorStream.bufferedReader().readText() } catch (_: Exception) { "" }
+                val code = p.exitValue()
+                ShellResult(code, stdout.trim(), stderr.trim())
             } catch (e: Exception) {
                 try { process?.destroyForcibly() } catch (_: Exception) {}
                 Log.e(TAG, "root exec failed: $command", e)
                 ShellResult(-1, "", e.message ?: "exception")
+            } finally {
+                try { process?.destroy() } catch (_: Exception) {}
             }
         }
 
@@ -84,14 +85,17 @@ class ShizukuShellExecutor : ShellExecutor {
                 ) as? Process
                     ?: return@withContext ShellResult(-1, "", "Shizuku.newProcess 返回 null")
                 try {
-                    withTimeout(timeoutMs) {
-                        val stdout = async { process.inputStream.bufferedReader().readText() }
-                        val stderr = async { process.errorStream.bufferedReader().readText() }
-                        val code = process.waitFor()
-                        ShellResult(code, stdout.await().trim(), stderr.await().trim())
+                    val finished = process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    if (!finished) {
+                        try { process.destroyForcibly() } catch (_: Exception) {}
+                        process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+                        return@withContext ShellResult(-1, "", "timeout after ${timeoutMs}ms")
                     }
+                    val stdout = try { process.inputStream.bufferedReader().readText() } catch (_: Exception) { "" }
+                    val stderr = try { process.errorStream.bufferedReader().readText() } catch (_: Exception) { "" }
+                    ShellResult(process.exitValue(), stdout.trim(), stderr.trim())
                 } finally {
-                    process.destroy()
+                    try { process.destroy() } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "shizuku exec failed: $command", e)

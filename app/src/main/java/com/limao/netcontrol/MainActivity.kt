@@ -121,7 +121,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun NetControlRoot() {
         val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
-        val customBgPath by settingsViewModel.customBackgroundPath.collectAsStateWithLifecycle(initialValue = "")
         val darkTheme = when (themeMode) {
             SettingsRepository.ThemeMode.LIGHT -> false
             SettingsRepository.ThemeMode.DARK -> true
@@ -145,7 +144,7 @@ class MainActivity : ComponentActivity() {
         }
 
         NetControlTheme(darkTheme) {
-            GlassScaffold(darkTheme, customBgPath) {
+            GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
                     when (val s = current) {
                         is Screen.Home -> HomeScreen(

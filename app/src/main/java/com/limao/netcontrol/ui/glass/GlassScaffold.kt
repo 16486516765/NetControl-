@@ -15,8 +15,6 @@ import androidx.compose.ui.graphics.Color
  */
 @Composable
 fun GlassScaffold(
-    darkTheme: Boolean,
-    customBackgroundPath: String = "",
     content: @Composable BoxScope.() -> Unit
 ) {
     // 纯黑背景，无视主题，永远黑

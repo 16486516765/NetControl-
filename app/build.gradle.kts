@@ -20,7 +20,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 一、7 优化：开启 R8 混淆+资源压缩（proguard 已 keep rikka.shizuku.**）
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -79,14 +81,6 @@ dependencies {
     // 纯 Material 3，不再使用玻璃拟态库
 }
 
-// Kyant0 LiquidGlass 的 AAR 元数据声明 minCompileSdk=37，但 Google 尚未公开发布
-// android-37 SDK 平台（公开仓库最高只有 android-36），此处跳过 AAR 元数据版本检查。
-// 该库实际使用的图形 API 在旧版本即存在，跳过检查不影响编译与运行。
-tasks.configureEach {
-    if (name.contains("AarMetadata")) {
-        enabled = false
-    }
-}
     kotlin {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)

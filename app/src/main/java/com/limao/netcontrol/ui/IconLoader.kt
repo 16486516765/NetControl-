@@ -37,13 +37,15 @@ object IconLoader {
 
     suspend fun load(
         context: android.content.Context,
-        packageName: String
+        packageName: String,
+        px: Int = 96
     ): ImageBitmap? = withContext(Dispatchers.IO) {
-        cache[packageName]?.let { return@withContext it }
+        val key = "$packageName@$px"
+        cache[key]?.let { return@withContext it }
         try {
             val drawable = context.packageManager.getApplicationIcon(packageName)
-            val bitmap = drawable.toBitmap(96, 96, Bitmap.Config.ARGB_8888).asImageBitmap()
-            cache[packageName] = bitmap
+            val bitmap = drawable.toBitmap(px, px, Bitmap.Config.ARGB_8888).asImageBitmap()
+            cache[key] = bitmap
             bitmap
         } catch (_: Exception) {
             null
@@ -59,9 +61,12 @@ fun AppIcon(
     size: Dp = 48.dp
 ) {
     val context = LocalContext.current
-    var bitmap by remember(packageName) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(packageName) {
-        bitmap = IconLoader.load(context, packageName)
+    // 一、6 优化：按实际屏幕密度计算像素尺寸，高密度屏不再发糊
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val px = remember(size, density) { with(density) { size.roundToPx() } }
+    var bitmap by remember(packageName, px) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(packageName, px) {
+        bitmap = IconLoader.load(context, packageName, px)
     }
     if (bitmap != null) {
         Image(

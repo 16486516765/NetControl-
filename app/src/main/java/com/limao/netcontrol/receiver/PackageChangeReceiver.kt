@@ -39,7 +39,19 @@ class PackageChangeReceiver : BroadcastReceiver() {
                 }
                 scope.launch {
                     try {
-                        RuleRepository(appContext).removeRule(pkg)
+                        val repo = RuleRepository(appContext)
+                        val rule = repo.rulesFlow.first()[pkg]
+                        repo.removeRule(pkg)
+                        // 二、6 修复：同时清理系统 iptables 规则，避免 UID 被新应用复用后继承封禁
+                        if (rule != null) {
+                            try {
+                                val session = (appContext as com.limao.netcontrol.NetControlApp).session
+                                session.controller.unblockApp(rule.uid)
+                                Log.i(TAG, "system rule cleaned for uninstalled $pkg (uid=${rule.uid})")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "clean system rule failed for $pkg", e)
+                            }
+                        }
                         Log.i(TAG, "rule cleaned for uninstalled $pkg")
                     } catch (e: Exception) {
                         Log.e(TAG, "clean rule failed for $pkg", e)

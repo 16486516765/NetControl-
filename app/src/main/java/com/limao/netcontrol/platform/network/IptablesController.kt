@@ -1,6 +1,8 @@
 package com.limao.netcontrol.platform.network
 
 import android.util.Log
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 基于 iptables 的网络控制器基类，Root 与 Shizuku 共用。
@@ -23,6 +25,7 @@ abstract class IptablesController(
     private var iptablesBin: String? = null
     private var ip6tablesBin: String? = null
     private var binariesResolved = false
+    private val resolveMutex = Mutex()
 
     private var transportCache: Pair<Long, TransportInfo>? = null
 
@@ -30,28 +33,32 @@ abstract class IptablesController(
     // 规则描述
     // ------------------------------------------------------------------
 
-    /** iface == null 表示统一规则（全部接口）；否则为按接口分组规则。 */
+    /** iface == null 表示统一规则（全部接口）；否则为按接口分组规则。-w 防并发锁冲突。 */
     private fun ruleSpec(uid: Int, iface: String?): String =
-        if (iface == null) "-m owner --uid-owner $uid -j REJECT"
-        else "-o $iface -m owner --uid-owner $uid -j REJECT"
+        if (iface == null) "-w -m owner --uid-owner $uid -j REJECT"
+        else "-w -o $iface -m owner --uid-owner $uid -j REJECT"
 
-    private suspend fun resolveBinaries(): Boolean {
+    private suspend fun resolveBinaries(): Boolean = resolveMutex.withLock {
         if (binariesResolved) return iptablesBin != null
-        binariesResolved = true
-        iptablesBin = listOf("iptables", "/system/bin/iptables").firstOrNull { bin ->
-            shell.exec("$bin --version").success
+        try {
+            iptablesBin = listOf("iptables", "/system/bin/iptables").firstOrNull { bin ->
+                shell.exec("$bin -w --version").success
+            }
+            if (iptablesBin == null) {
+                Log.e(logTag, "iptables binary not found")
+                return false
+            }
+            ip6tablesBin = listOf("ip6tables", "/system/bin/ip6tables").firstOrNull { bin ->
+                shell.exec("$bin -w --version").success
+            }
+            if (ip6tablesBin == null) {
+                Log.w(logTag, "ip6tables not found, IPv6 rules will be skipped")
+            }
+            return true
+        } finally {
+            // 只有成功或明确失败才标记，避免取消导致永久卡死
+            binariesResolved = true
         }
-        if (iptablesBin == null) {
-            Log.e(logTag, "iptables binary not found")
-            return false
-        }
-        ip6tablesBin = listOf("ip6tables", "/system/bin/ip6tables").firstOrNull { bin ->
-            shell.exec("$bin --version").success
-        }
-        if (ip6tablesBin == null) {
-            Log.w(logTag, "ip6tables not found, IPv6 rules will be skipped")
-        }
-        return true
     }
 
     /** IPv4 必需；IPv6 尽力。 */
@@ -105,16 +112,25 @@ abstract class IptablesController(
         if (bins.isEmpty()) {
             return Result.failure(IllegalStateException("iptables 不可用，无法执行网络控制"))
         }
-        for (bin in bins) {
-            if (!addRule(bin, uid, null)) {
-                return Result.failure(IllegalStateException("写入 iptables 规则失败（uid=$uid）"))
+        // 一、1 优化：合成单个脚本，一次 su 完成所有操作，而非每个 -C/-I 都起进程
+        val script = buildString {
+            for (bin in bins) {
+                // 存在则跳过，不存在则插入
+                appendLine("$bin -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin -w -I OUTPUT -m owner --uid-owner $uid -j REJECT")
+            }
+            ip6tablesBin?.let { bin6 ->
+                appendLine("$bin6 -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin6 -w -I OUTPUT -m owner --uid-owner $uid -j REJECT || true")
             }
         }
-        // IPv6 尽力
-        ip6tablesBin?.let { bin6 ->
-            if (!addRule(bin6, uid, null)) {
-                Log.w(logTag, "IPv6 block rule failed for uid=$uid (best effort)")
-            }
+        val r = shell.exec(script, timeoutMs = 30000)
+        if (!r.success) {
+            Log.e(logTag, "block script failed (uid=$uid): ${r.stderr}")
+            return Result.failure(IllegalStateException("写入 iptables 规则失败（uid=$uid）"))
+        }
+        // 批量验证：一次查询确认
+        if (!ruleExists(bins.first(), uid, null)) {
+            Log.e(logTag, "rule verify failed after block (uid=$uid)")
+            return Result.failure(IllegalStateException("规则验证失败（uid=$uid）"))
         }
         return Result.success(Unit)
     }
@@ -124,21 +140,26 @@ abstract class IptablesController(
         if (bins.isEmpty()) {
             return Result.failure(IllegalStateException("iptables 不可用，无法解除网络限制"))
         }
-        val ifaces = detectTransports().getOrNull()?.let {
-            it.wifiInterfaces + it.mobileInterfaces
-        }.orEmpty()
-        for (bin in bins) {
-            if (!removeRule(bin, uid, null)) {
-                return Result.failure(IllegalStateException("删除 iptables 规则失败（uid=$uid）"))
+        // 一、1 优化：单脚本循环删除，最多 10 次，避免逐条起进程
+        val script = buildString {
+            for (bin in bins) {
+                appendLine("for i in 1 2 3 4 5 6 7 8 9 10; do $bin -w -D OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done")
+                // 按接口分组规则也清理（尽力）
+                appendLine("for iface in \$(ls /sys/class/net 2>/dev/null); do for i in 1 2 3; do $bin -w -D OUTPUT -o \$iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done; done")
             }
-            for (iface in ifaces) {
-                // 分组规则清理为尽力操作：不存在即视为成功
-                removeRule(bin, uid, iface)
+            ip6tablesBin?.let { bin6 ->
+                appendLine("for i in 1 2 3 4 5 6 7 8 9 10; do $bin6 -w -D OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done || true")
             }
         }
-        ip6tablesBin?.let { bin6 ->
-            removeRule(bin6, uid, null)
-            for (iface in ifaces) removeRule(bin6, uid, iface)
+        val r = shell.exec(script, timeoutMs = 30000)
+        if (!r.success) {
+            Log.e(logTag, "unblock script failed (uid=$uid): ${r.stderr}")
+            return Result.failure(IllegalStateException("删除 iptables 规则失败（uid=$uid）"))
+        }
+        // 批量验证
+        if (ruleExists(bins.first(), uid, null)) {
+            Log.e(logTag, "rule still exists after unblock (uid=$uid)")
+            return Result.failure(IllegalStateException("规则清理验证失败（uid=$uid）"))
         }
         return Result.success(Unit)
     }
@@ -244,20 +265,31 @@ abstract class IptablesController(
         if (bins.isEmpty()) {
             return Result.failure(IllegalStateException("iptables 不可用"))
         }
-        for (bin in bins) {
-            for (iface in ifaces) {
-                val ok = if (blocked) addRule(bin, uid, iface) else removeRule(bin, uid, iface)
-                if (!ok) {
-                    return Result.failure(
-                        IllegalStateException("$label 规则应用失败（uid=$uid, iface=$iface）")
-                    )
+        // 批量脚本：一次 su 处理所有接口
+        val script = buildString {
+            for (bin in bins) {
+                for (iface in ifaces) {
+                    if (blocked) {
+                        appendLine("$bin -w -C OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin -w -I OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT")
+                    } else {
+                        appendLine("for i in 1 2 3; do $bin -w -D OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done")
+                    }
+                }
+            }
+            ip6tablesBin?.let { bin6 ->
+                for (iface in ifaces) {
+                    if (blocked) {
+                        appendLine("$bin6 -w -C OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin6 -w -I OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT || true")
+                    } else {
+                        appendLine("for i in 1 2 3; do $bin6 -w -D OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done || true")
+                    }
                 }
             }
         }
-        ip6tablesBin?.let { bin6 ->
-            for (iface in ifaces) {
-                if (blocked) addRule(bin6, uid, iface) else removeRule(bin6, uid, iface)
-            }
+        val r = shell.exec(script, timeoutMs = 30000)
+        if (!r.success) {
+            Log.e(logTag, "$label script failed (uid=$uid): ${r.stderr}")
+            return Result.failure(IllegalStateException("$label 规则应用失败（uid=$uid）"))
         }
         return Result.success(Unit)
     }
@@ -289,7 +321,7 @@ abstract class IptablesController(
         val bin = binsStrict().firstOrNull() ?: return emptySet()
         // 注意 Kotlin 字符串中 $u 需转义为 \$u，留给 shell 展开
         val script = "for u in ${uids.joinToString(" ")}; do " +
-            "$bin -C OUTPUT -m owner --uid-owner \$u -j REJECT >/dev/null 2>&1 && echo \$u; done"
+            "$bin -w -C OUTPUT -m owner --uid-owner \$u -j REJECT >/dev/null 2>&1 && echo \$u; done"
         val r = shell.exec(script, timeoutMs = 60000)
         if (!r.success) {
             Log.e(logTag, "batch check failed: ${r.stderr}")
@@ -304,7 +336,7 @@ abstract class IptablesController(
      */
     override suspend fun getAllUidRules(): Map<Int, UidRuleDetail> {
         val bin = binsStrict().firstOrNull() ?: return emptyMap()
-        val r = shell.exec("$bin -S OUTPUT", timeoutMs = 30000)
+        val r = shell.exec("$bin -w -S OUTPUT", timeoutMs = 30000)
         if (!r.success) {
             Log.e(logTag, "dump rules failed: ${r.stderr}")
             return emptyMap()
