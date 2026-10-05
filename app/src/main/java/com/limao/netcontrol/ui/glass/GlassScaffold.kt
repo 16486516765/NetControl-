@@ -23,7 +23,7 @@ import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
 val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 /** 是否有自定义背景图（自定义背景下卡片需要加遮罩保证可读性）。 */
-val LocalHasCustomBackground = staticCompositionLocalOf { false }
+val LocalHasCustomBackground: androidx.compose.runtime.StaticCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
 /**
  * 背景绘制逻辑：默认渐变 + 装饰光斑；若用户设置了自定义背景图，
