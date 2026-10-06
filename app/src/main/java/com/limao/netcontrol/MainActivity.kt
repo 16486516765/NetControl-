@@ -34,6 +34,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
@@ -91,7 +93,7 @@ class MainActivity : ComponentActivity() {
                     Log.i(TAG, "shizuku granted, polling for auth state")
                     lifecycleScope.launch {
                         repeat(5) { attempt ->
-                            kotlinx.coroutines.delay(500)
+                            delay(500)
                             val authorized = try {
                                 Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
                             } catch (_: Exception) { false }
