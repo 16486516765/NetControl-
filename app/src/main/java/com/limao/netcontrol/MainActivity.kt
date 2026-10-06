@@ -33,6 +33,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
@@ -83,10 +84,30 @@ class MainActivity : ComponentActivity() {
     private val settingsViewModel: SettingsViewModel by viewModels { appVmFactory }
 
     private val shizukuPermissionListener =
-        Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
             if (requestCode == SHIZUKU_REQUEST_CODE) {
-                Log.i(TAG, "shizuku permission result received, re-detect")
-                mainViewModel.redetect()
+                if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    // 授权通过：轮询等系统同步完成，最多 5 次 x 500ms
+                    Log.i(TAG, "shizuku granted, polling for auth state")
+                    lifecycleScope.launch {
+                        repeat(5) { attempt ->
+                            kotlinx.coroutines.delay(500)
+                            val authorized = try {
+                                Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            } catch (_: Exception) { false }
+                            Log.i(TAG, "shizuku auth poll ${attempt + 1}/5: $authorized")
+                            if (authorized) {
+                                mainViewModel.redetect()
+                                return@launch
+                            }
+                        }
+                        Log.i(TAG, "shizuku poll timeout, redetect anyway")
+                        mainViewModel.redetect()
+                    }
+                } else {
+                    Log.i(TAG, "shizuku denied, re-detect")
+                    mainViewModel.redetect()
+                }
             }
         }
     private val binderReceivedListener =
