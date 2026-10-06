@@ -72,6 +72,10 @@ class NetControlSession(
 
     fun clearPrivilegeCache() = privilegeManager.clearCache()
 
+    /** 即时检测当前权限状态（不经过缓存），用于操作失败时判断是否为权限丢失。 */
+    suspend fun detectPrivilegeNow(): PrivilegeManager.Privilege =
+        privilegeManager.detectPrivilege()
+
     /**
      * 启动校验：读取持久化规则 → 检查系统实际规则 → 对比 →
      * UID 变化则更新、系统规则丢失则重新应用 → 更新 UI 状态。

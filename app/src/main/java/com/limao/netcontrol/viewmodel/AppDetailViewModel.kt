@@ -129,8 +129,14 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
                     refreshActual(info)
                 } else {
                     val rawMsg = result.exceptionOrNull()?.message ?: "网络规则应用失败"
-                    // 问题2修复：疑似权限丢失时说人话 + 自动重检
-                    _applyError.value = if (rawMsg.contains("规则验证失败") || rawMsg.contains("iptables")) {
+                    // 权限丢失才说人话：先做一次新鲜检测，确认没权限才报权限失效
+                    val fresh = session.detectPrivilegeNow()
+                    val noPrivilege = when (fresh) {
+                        is com.limao.netcontrol.platform.network.PrivilegeManager.Privilege.Root -> !fresh.usable
+                        is com.limao.netcontrol.platform.network.PrivilegeManager.Privilege.Shizuku -> !fresh.authorized
+                        else -> true
+                    }
+                    _applyError.value = if (noPrivilege) {
                         launch {
                             session.clearPrivilegeCache()
                             session.detect(this)
