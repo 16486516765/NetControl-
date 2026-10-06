@@ -1,5 +1,6 @@
 package com.limao.netcontrol.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -85,45 +87,58 @@ fun HomeScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // 无权限时显示提示横幅（检测中时不显示，避免闪烁）
-        if (!hasPrivilege && privilege !is PrivilegeManager.Privilege.Detecting) {
-            UnauthorizedBanner(modifier = Modifier.padding(horizontal = 16.dp))
-            Spacer(Modifier.height(12.dp))
-        }
-
-        // 搜索框固定在顶部：与列表紧密衔接，消除割裂感
-        GlassSearchBar(
-            query = query,
-            onQueryChange = listViewModel::setSearchQuery,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Box(Modifier.weight(1f)) {
-            if (isLoading && rows.isEmpty()) {
-                CircularProgressIndicator(Modifier.align(Alignment.Center))
-            } else if (loadError != null && rows.isEmpty()) {
-                Text(
-                    loadError ?: "加载失败",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.align(Alignment.Center)
+        // 搜索+列表共用 section：一家人，不割裂
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp)
+                .background(
+                    color = Color(0xFF0C0C0E),
+                    shape = RoundedCornerShape(24.dp)
                 )
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(rows, key = { it.info.packageName }) { row ->
-                        AppRowCard(
-                            row = row,
-                            hasPrivilege = hasPrivilege,
-                            modifier = Modifier.animateItem(),
-                            onToggle = { allowed ->
-                                listViewModel.setAppBlocked(row.info.packageName, !allowed)
-                            },
-                            onClick = { onAppClick(row.info) }
-                        )
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+        ) {
+            // 搜索框固定在 section 顶部
+            GlassSearchBar(
+                query = query,
+                onQueryChange = listViewModel::setSearchQuery,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // 无权限时显示提示横幅（检测中时不显示，避免闪烁）
+            if (!hasPrivilege && privilege !is PrivilegeManager.Privilege.Detecting) {
+                UnauthorizedBanner(modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+            }
+
+            Box(Modifier.weight(1f)) {
+                if (isLoading && rows.isEmpty()) {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                } else if (loadError != null && rows.isEmpty()) {
+                    Text(
+                        loadError ?: "加载失败",
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(rows, key = { it.info.packageName }) { row ->
+                            AppRowCard(
+                                row = row,
+                                hasPrivilege = hasPrivilege,
+                                modifier = Modifier.animateItem(),
+                                onToggle = { allowed ->
+                                    listViewModel.setAppBlocked(row.info.packageName, !allowed)
+                                },
+                                onClick = { onAppClick(row.info) }
+                            )
+                        }
                     }
                 }
             }
