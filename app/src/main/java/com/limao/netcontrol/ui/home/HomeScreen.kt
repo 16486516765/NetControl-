@@ -1,6 +1,7 @@
 package com.limao.netcontrol.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,6 +50,12 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val privilege by mainViewModel.privilege.collectAsStateWithLifecycle()
+    // 是否有操作权限：Root 可用或 Shizuku 已授权；检测中/无权限时禁用开关
+    val hasPrivilege = when (privilege) {
+        is PrivilegeManager.Privilege.Root -> privilege.usable
+        is PrivilegeManager.Privilege.Shizuku -> privilege.authorized
+        else -> false
+    }
     val query by listViewModel.searchQuery.collectAsStateWithLifecycle()
     val rows by listViewModel.rows.collectAsStateWithLifecycle()
     val isLoading by listViewModel.isLoading.collectAsStateWithLifecycle()
@@ -79,13 +86,11 @@ fun HomeScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        GlassSearchBar(
-            query = query,
-            onQueryChange = listViewModel::setSearchQuery,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(Modifier.height(12.dp))
+        // 无权限时显示提示横幅（检测中时不显示，避免闪烁）
+        if (!hasPrivilege && privilege !is PrivilegeManager.Privilege.Detecting) {
+            UnauthorizedBanner(modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(Modifier.height(12.dp))
+        }
 
         Box(Modifier.weight(1f)) {
             if (isLoading && rows.isEmpty()) {
@@ -103,9 +108,25 @@ fun HomeScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // 搜索框吸顶：与列表同一滚动容器，消除视觉割裂感
+                    stickyHeader {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.background)
+                                .padding(bottom = 2.dp)
+                        ) {
+                            GlassSearchBar(
+                                query = query,
+                                onQueryChange = listViewModel::setSearchQuery,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                     items(rows, key = { it.info.packageName }) { row ->
                         AppRowCard(
                             row = row,
+                            hasPrivilege = hasPrivilege,
                             modifier = Modifier.animateItem(),
                             onToggle = { allowed ->
                                 listViewModel.setAppBlocked(row.info.packageName, !allowed)
@@ -201,8 +222,41 @@ private fun PrivilegeCard(
 }
 
 @Composable
+private fun UnauthorizedBanner(modifier: Modifier = Modifier) {
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 18.dp
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "\u26A0\uFE0F",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "未授权：开关已禁用",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = Color(0xFFFF9F0A)
+                )
+                Text(
+                    text = "请先在上方完成 Shizuku 或 Root 授权",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AppRowCard(
     row: AppRow,
+    hasPrivilege: Boolean,
     modifier: Modifier = Modifier,
     onToggle: (allowed: Boolean) -> Unit,
     onClick: () -> Unit
@@ -256,7 +310,8 @@ private fun AppRowCard(
                 LiquidToggle(
                     checked = row.status == NetworkStatus.ALLOWED,
                     onCheckedChange = onToggle,
-                    enabled = !row.operating &&
+                    enabled = hasPrivilege &&
+                        !row.operating &&
                         row.status != NetworkStatus.UNKNOWN &&
                         row.status != NetworkStatus.ERROR
                 )
