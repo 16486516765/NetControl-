@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
+import com.limao.netcontrol.platform.network.PrivilegeManager
 import com.limao.netcontrol.ui.AppIcon
 import com.limao.netcontrol.ui.glass.GlassCard
 import com.limao.netcontrol.ui.glass.LiquidButton
@@ -53,6 +54,13 @@ fun AppDetailScreen(
     val applyError by detailViewModel.applyError.collectAsStateWithLifecycle()
     val applySuccess by detailViewModel.applySuccess.collectAsStateWithLifecycle()
     val splitSupported by mainViewModel.splitSupported.collectAsStateWithLifecycle()
+    val privilege by mainViewModel.privilege.collectAsStateWithLifecycle()
+    // 是否有操作权限：Root 可用或 Shizuku 已授权；无权限时禁用所有开关
+    val hasPrivilege = when (val p = privilege) {
+        is PrivilegeManager.Privilege.Root -> p.usable
+        is PrivilegeManager.Privilege.Shizuku -> p.authorized
+        else -> false
+    }
 
     LaunchedEffect(packageName) {
         detailViewModel.clearApplyState()
@@ -117,6 +125,36 @@ fun AppDetailScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        // 无权限时显示提示横幅
+        if (!hasPrivilege) {
+            GlassCard(Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "\u26A0\uFE0F",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "未授权：控制已禁用",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = Color(0xFFFF9F0A)
+                        )
+                        Text(
+                            text = "请先完成 Shizuku 或 Root 授权",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         // 联网控制草稿
         GlassCard(Modifier.fillMaxWidth()) {
             Text(
@@ -131,6 +169,7 @@ fun AppDetailScreen(
                 label = "统一联网",
                 sub = if (draftBlocked) "禁止" else "允许",
                 checked = !draftBlocked,
+                enabled = hasPrivilege && !applying,
                 onChange = {
                     detailViewModel.updateDraft(!it, draftWifi, draftMobile)
                 }
@@ -139,6 +178,7 @@ fun AppDetailScreen(
                 label = "Wi-Fi",
                 sub = if (draftWifi) "禁止" else "允许",
                 checked = !draftWifi,
+                enabled = hasPrivilege && !applying,
                 onChange = {
                     detailViewModel.updateDraft(draftBlocked, !it, draftMobile)
                 }
@@ -147,6 +187,7 @@ fun AppDetailScreen(
                 label = "移动数据",
                 sub = if (draftMobile) "禁止" else "允许",
                 checked = !draftMobile,
+                enabled = hasPrivilege && !applying,
                 onChange = {
                     detailViewModel.updateDraft(draftBlocked, draftWifi, !it)
                 }
@@ -165,7 +206,7 @@ fun AppDetailScreen(
 
         LiquidButton(
             onClick = { detailViewModel.applyNow() },
-            enabled = !applying,
+            enabled = hasPrivilege && !applying,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
@@ -202,6 +243,7 @@ private fun ToggleRow(
     label: String,
     sub: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onChange: (Boolean) -> Unit
 ) {
     Row(
@@ -223,6 +265,6 @@ private fun ToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        LiquidToggle(checked = checked, onCheckedChange = onChange)
+        LiquidToggle(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
