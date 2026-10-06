@@ -185,6 +185,15 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 refreshStatuses(apps)
+                // 性能优化：后台预加载所有应用图标，滑动时直接命中内存缓存
+                launch {
+                    try {
+                        val ctx = getApplication<Application>().applicationContext
+                        com.limao.netcontrol.ui.IconLoader.preload(
+                            ctx, apps.map { it.packageName }
+                        )
+                    } catch (_: Exception) { }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "load apps failed", e)
                 _loadError.value = e.message ?: "加载应用列表失败"
