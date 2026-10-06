@@ -45,13 +45,13 @@ fun GlassBottomBar(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         NavigationBar(
-            containerColor = Color(0xFF1C1C1E),
-            contentColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(barShape)
-                .background(Color(0xFF1C1C1E), barShape)
+                .background(MaterialTheme.colorScheme.surface, barShape)
         ) {
             tabs.forEachIndexed { index, tab ->
                 NavigationBarItem(
@@ -64,8 +64,8 @@ fun GlassBottomBar(
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = colors.primary,
                         selectedTextColor = colors.primary,
-                        unselectedIconColor = Color(0xFF8E8E93),
-                        unselectedTextColor = Color(0xFF8E8E93),
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         indicatorColor = colors.primary.copy(alpha = 0.2f)
                     )
                 )

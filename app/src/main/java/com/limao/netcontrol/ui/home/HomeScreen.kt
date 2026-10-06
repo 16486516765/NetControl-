@@ -93,7 +93,7 @@ fun HomeScreen(
                 .weight(1f)
                 .padding(horizontal = 16.dp)
                 .background(
-                    color = Color(0xFF0C0C0E),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
                     shape = RoundedCornerShape(24.dp)
                 )
                 .padding(horizontal = 12.dp, vertical = 12.dp)

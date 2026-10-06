@@ -23,6 +23,8 @@ private val DarkColors = darkColorScheme(
     surface = Color(0xFF1C1C1E),
     onSurface = Color.White,
     onSurfaceVariant = Color(0xFFAEAEB2),
+    surfaceContainerLowest = Color(0xFF0C0C0E),
+    outlineVariant = Color(0xFF3A3A3C),
     error = Color(0xFFFF453A)
 )
 
@@ -31,9 +33,8 @@ fun NetControlTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    // 纯黑背景，永远用深色高对比主题
     MaterialTheme(
-        colorScheme = DarkColors,
+        colorScheme = if (darkTheme) DarkColors else LightColors,
         content = content
     )
 }
