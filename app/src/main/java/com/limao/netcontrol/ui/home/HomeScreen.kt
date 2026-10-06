@@ -1,6 +1,7 @@
 package com.limao.netcontrol.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import com.limao.netcontrol.viewmodel.AppListViewModel
 import com.limao.netcontrol.viewmodel.AppRow
 import com.limao.netcontrol.viewmodel.MainViewModel
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     mainViewModel: MainViewModel,
@@ -52,9 +54,9 @@ fun HomeScreen(
 ) {
     val privilege by mainViewModel.privilege.collectAsStateWithLifecycle()
     // 是否有操作权限：Root 可用或 Shizuku 已授权；检测中/无权限时禁用开关
-    val hasPrivilege = when (privilege) {
-        is PrivilegeManager.Privilege.Root -> privilege.usable
-        is PrivilegeManager.Privilege.Shizuku -> privilege.authorized
+    val hasPrivilege = when (val p = privilege) {
+        is PrivilegeManager.Privilege.Root -> p.usable
+        is PrivilegeManager.Privilege.Shizuku -> p.authorized
         else -> false
     }
     val query by listViewModel.searchQuery.collectAsStateWithLifecycle()
