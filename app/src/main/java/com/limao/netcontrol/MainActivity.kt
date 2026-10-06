@@ -32,6 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
@@ -125,6 +131,23 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun NetControlRoot() {
+        // 问题1修复：回到前台自动重检权限（静默更新UI）
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val firstResume = remember { mutableStateOf(true) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    if (firstResume.value) {
+                        firstResume.value = false
+                    } else {
+                        mainViewModel.redetect()
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
         val darkTheme = when (themeMode) {
             SettingsRepository.ThemeMode.LIGHT -> false

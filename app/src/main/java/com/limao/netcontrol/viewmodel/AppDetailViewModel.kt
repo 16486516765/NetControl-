@@ -128,8 +128,17 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
                     _applySuccess.value = true
                     refreshActual(info)
                 } else {
-                    _applyError.value =
-                        result.exceptionOrNull()?.message ?: "网络规则应用失败"
+                    val rawMsg = result.exceptionOrNull()?.message ?: "网络规则应用失败"
+                    // 问题2修复：疑似权限丢失时说人话 + 自动重检
+                    _applyError.value = if (rawMsg.contains("规则验证失败") || rawMsg.contains("iptables")) {
+                        launch {
+                            session.clearPrivilegeCache()
+                            session.detect(this)
+                        }
+                        "权限已失效，请重新授权"
+                    } else {
+                        rawMsg
+                    }
                 }
             } finally {
                 _applying.value = false

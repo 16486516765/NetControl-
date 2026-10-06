@@ -268,8 +268,19 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     _ruleDetails.value = cur
                 } else {
-                    val msg = result.exceptionOrNull()?.message ?: "网络规则应用失败"
-                    Log.e(TAG, "setAppBlocked failed for $packageName: $msg")
+                    val rawMsg = result.exceptionOrNull()?.message ?: "网络规则应用失败"
+                    Log.e(TAG, "setAppBlocked failed for $packageName: $rawMsg")
+                    // 问题2修复：疑似权限丢失时说人话 + 自动重检
+                    val msg = if (rawMsg.contains("规则验证失败") || rawMsg.contains("iptables")) {
+                        // 触发权限重检，UI 自动更新为禁用态
+                        launch {
+                            session.clearPrivilegeCache()
+                            session.detect(this)
+                        }
+                        "权限已失效，请重新授权"
+                    } else {
+                        rawMsg
+                    }
                     _errors.value = _errors.value + (packageName to msg)
                 }
             } finally {
