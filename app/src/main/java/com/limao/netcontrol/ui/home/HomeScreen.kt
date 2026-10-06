@@ -106,6 +106,8 @@ fun HomeScreen(
                     items(rows, key = { it.info.packageName }) { row ->
                         AppRowCard(
                             row = row,
+                            // 列表增删/过滤时位移动画：底层走 graphicsLayer，不触发布局重组
+                            modifier = Modifier.animateItem(),
                             onToggle = { allowed ->
                                 listViewModel.setAppBlocked(row.info.packageName, !allowed)
                             },
@@ -202,12 +204,13 @@ private fun PrivilegeCard(
 @Composable
 private fun AppRowCard(
     row: AppRow,
+    modifier: Modifier = Modifier,
     onToggle: (allowed: Boolean) -> Unit,
     onClick: () -> Unit
 ) {
     val info = row.info
     GlassCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         cornerRadius = 18.dp,
         onClick = onClick
     ) {

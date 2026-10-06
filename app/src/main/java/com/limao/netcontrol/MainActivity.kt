@@ -8,6 +8,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -146,7 +154,21 @@ class MainActivity : ComponentActivity() {
         NetControlTheme(darkTheme) {
             GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
-                    when (val s = current) {
+                    // 页面转场：淡入 + 轻微右滑进入（仅透明度/位移，RenderThread 驱动，零重组开销）。
+                    AnimatedContent(
+                        targetState = current,
+                        transitionSpec = {
+                            (fadeIn(tween(240, easing = FastOutSlowInEasing)) +
+                                slideInHorizontally(
+                                    tween(240, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { it / 12 }
+                                )) togetherWith
+                                fadeOut(tween(180, easing = LinearOutSlowInEasing))
+                        },
+                        label = "screenTransition",
+                        modifier = Modifier.fillMaxSize()
+                    ) { screen ->
+                        when (val s = screen) {
                         is Screen.Home -> HomeScreen(
                             mainViewModel = mainViewModel,
                             listViewModel = appListViewModel,
@@ -182,7 +204,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { backStack.removeLastOrNull() }
                             )
                         }
-                    }
+                    } // end AnimatedContent
 
                     if (current !is Screen.Detail) {
                         val selectedIndex = when (current) {
