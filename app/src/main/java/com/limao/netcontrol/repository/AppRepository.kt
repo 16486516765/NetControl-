@@ -7,6 +7,8 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import com.limao.netcontrol.data.AppInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 /** 扫描设备已安装应用。 */
@@ -21,21 +23,24 @@ class AppRepository(private val context: Context) {
             @Suppress("DEPRECATION")
             pm.getInstalledApplications(0)
         }
-        installed
+        // 性能优化：loadLabel 是 Binder 调用，并行化加速 500 个应用的加载
+        val deferred = installed
             .asSequence()
             .filter { it.packageName != context.packageName }
             .map { ai ->
-                val isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
-                    (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                AppInfo(
-                    packageName = ai.packageName,
-                    appName = ai.loadLabel(pm)?.toString() ?: ai.packageName,
-                    uid = ai.uid,
-                    isSystemApp = isSystem
-                )
+                async {
+                    val isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                        (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                    AppInfo(
+                        packageName = ai.packageName,
+                        appName = ai.loadLabel(pm)?.toString() ?: ai.packageName,
+                        uid = ai.uid,
+                        isSystemApp = isSystem
+                    )
+                }
             }
-            .sortedBy { it.appName.lowercase() }
             .toList()
+        deferred.awaitAll().sortedBy { it.appName.lowercase() }
     }
 
     /** 按包名取 UID（应用更新后 UID 可能变化）。IO 线程执行。 */
