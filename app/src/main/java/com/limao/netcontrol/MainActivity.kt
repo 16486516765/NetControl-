@@ -186,6 +186,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     } // end run (was AnimatedContent)
+                    }
 
                     if (current !is Screen.Detail) {
                         val selectedIndex = when (current) {
