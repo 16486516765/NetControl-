@@ -36,7 +36,6 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    // （pressScale 暂时去掉，排查构建问题）
     Card(
         modifier = modifier.then(
             if (onClick != null) Modifier.clickable(onClick = onClick)

@@ -146,10 +146,7 @@ class MainActivity : ComponentActivity() {
         NetControlTheme(darkTheme) {
             GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
-                    // （页面转场暂时回退为直接切换，排查构建问题）
-                    run {
-                        val screen = current
-                        when (val s = screen) {
+                    when (val s = current) {
                         is Screen.Home -> HomeScreen(
                             mainViewModel = mainViewModel,
                             listViewModel = appListViewModel,
@@ -185,7 +182,6 @@ class MainActivity : ComponentActivity() {
                                 onBack = { backStack.removeLastOrNull() }
                             )
                         }
-                    } // end run (was AnimatedContent)
                     }
 
                     if (current !is Screen.Detail) {
