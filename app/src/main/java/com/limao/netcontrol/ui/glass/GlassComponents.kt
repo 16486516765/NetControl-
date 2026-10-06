@@ -1,6 +1,8 @@
 package com.limao.netcontrol.ui.glass
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -19,11 +21,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.limao.netcontrol.ui.motion.pressScale
 
 /**
  * Material 3 卡片（深色，纯黑背景上的深灰卡片）。
@@ -36,10 +40,19 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    // 按压状态源：pressScale 与 clickable 共用，保证按压反馈同步。
+    val interactionSource = remember { MutableInteractionSource() }
     Card(
         modifier = modifier.then(
-            if (onClick != null) Modifier.clickable(onClick = onClick)
-            else Modifier
+            if (onClick != null) {
+                Modifier
+                    .pressScale(interactionSource)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = LocalIndication.current,
+                        onClick = onClick
+                    )
+            } else Modifier
         ),
         shape = RoundedCornerShape(cornerRadius),
         colors = CardDefaults.cardColors(

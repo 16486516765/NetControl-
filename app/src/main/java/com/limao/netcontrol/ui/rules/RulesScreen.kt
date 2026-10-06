@@ -77,7 +77,9 @@ fun RulesScreen(
                 items(restricted, key = { it.info.packageName }) { row ->
                     val rule = row.rule ?: return@items
                     GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateItem(),
                         cornerRadius = 18.dp,
                         onClick = { onAppClick(row.info) }
                     ) {
