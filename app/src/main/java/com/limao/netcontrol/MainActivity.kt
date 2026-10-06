@@ -9,12 +9,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -154,16 +151,12 @@ class MainActivity : ComponentActivity() {
         NetControlTheme(darkTheme) {
             GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
-                    // 页面转场：淡入 + 轻微右滑进入（仅透明度/位移，RenderThread 驱动，零重组开销）。
+                    // 页面转场：淡入淡出（仅透明度，RenderThread 驱动，零重组开销）。
                     AnimatedContent(
                         targetState = current,
                         transitionSpec = {
-                            (fadeIn(tween(240, easing = FastOutSlowInEasing)) +
-                                slideInHorizontally(
-                                    tween(240, easing = FastOutSlowInEasing),
-                                    initialOffsetX = { it / 12 }
-                                )) togetherWith
-                                fadeOut(tween(180, easing = LinearOutSlowInEasing))
+                            fadeIn(animationSpec = tween(durationMillis = 220)) togetherWith
+                                fadeOut(animationSpec = tween(durationMillis = 220))
                         },
                         label = "screenTransition",
                         modifier = Modifier.fillMaxSize()
