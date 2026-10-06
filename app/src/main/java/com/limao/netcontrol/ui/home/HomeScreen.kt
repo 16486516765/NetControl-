@@ -1,8 +1,6 @@
 package com.limao.netcontrol.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,7 +40,6 @@ import com.limao.netcontrol.viewmodel.AppListViewModel
 import com.limao.netcontrol.viewmodel.AppRow
 import com.limao.netcontrol.viewmodel.MainViewModel
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     mainViewModel: MainViewModel,
@@ -111,20 +107,13 @@ fun HomeScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // 搜索框吸顶：与列表同一滚动容器，消除视觉割裂感
-                    stickyHeader {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.background)
-                                .padding(bottom = 2.dp)
-                        ) {
-                            GlassSearchBar(
-                                query = query,
-                                onQueryChange = listViewModel::setSearchQuery,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                    // 搜索框作为列表第一项：与列表同一滚动容器，消除视觉割裂感
+                    item {
+                        GlassSearchBar(
+                            query = query,
+                            onQueryChange = listViewModel::setSearchQuery,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                     items(rows, key = { it.info.packageName }) { row ->
                         AppRowCard(
