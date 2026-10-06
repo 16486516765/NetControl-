@@ -155,6 +155,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun NetControlRoot() {
         // 问题1修复：回到前台自动重检权限（静默更新UI）
+        // 延迟 1 秒等系统同步完权限变更（撤销授权后立即查会拿到旧值）
         val lifecycleOwner = LocalLifecycleOwner.current
         val firstResume = remember { mutableStateOf(true) }
         DisposableEffect(lifecycleOwner) {
@@ -163,7 +164,10 @@ class MainActivity : ComponentActivity() {
                     if (firstResume.value) {
                         firstResume.value = false
                     } else {
-                        mainViewModel.redetect()
+                        lifecycleScope.launch {
+                            delay(1000)
+                            mainViewModel.redetect()
+                        }
                     }
                 }
             }
