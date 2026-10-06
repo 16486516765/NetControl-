@@ -91,6 +91,13 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
         }
 
+        // 搜索框固定在顶部：与列表紧密衔接，消除割裂感
+        GlassSearchBar(
+            query = query,
+            onQueryChange = listViewModel::setSearchQuery,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
         Box(Modifier.weight(1f)) {
             if (isLoading && rows.isEmpty()) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -103,18 +110,10 @@ fun HomeScreen(
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp, bottom = 96.dp
+                        start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // 搜索框作为列表第一项：与列表同一滚动容器，消除视觉割裂感
-                    item {
-                        GlassSearchBar(
-                            query = query,
-                            onQueryChange = listViewModel::setSearchQuery,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
                     items(rows, key = { it.info.packageName }) { row ->
                         AppRowCard(
                             row = row,
