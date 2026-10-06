@@ -8,11 +8,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -151,16 +146,9 @@ class MainActivity : ComponentActivity() {
         NetControlTheme(darkTheme) {
             GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
-                    // 页面转场：淡入淡出（仅透明度，RenderThread 驱动，零重组开销）。
-                    AnimatedContent(
-                        targetState = current,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(durationMillis = 220)) togetherWith
-                                fadeOut(animationSpec = tween(durationMillis = 220))
-                        },
-                        label = "screenTransition",
-                        modifier = Modifier.fillMaxSize()
-                    ) { screen ->
+                    // （页面转场暂时回退为直接切换，排查构建问题）
+                    run {
+                        val screen = current
                         when (val s = screen) {
                         is Screen.Home -> HomeScreen(
                             mainViewModel = mainViewModel,
@@ -197,7 +185,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { backStack.removeLastOrNull() }
                             )
                         }
-                    } // end AnimatedContent
+                    } // end run (was AnimatedContent)
 
                     if (current !is Screen.Detail) {
                         val selectedIndex = when (current) {
