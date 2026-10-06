@@ -1,5 +1,6 @@
 package com.limao.netcontrol.ui.glass
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,7 @@ fun GlassCard(
                     .pressScale(interactionSource)
                     .clickable(
                         interactionSource = interactionSource,
+                        indication = LocalIndication.current,
                         onClick = onClick
                     )
             } else Modifier
