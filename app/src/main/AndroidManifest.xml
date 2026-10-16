@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 查看已安装应用列表（Android 11+ 必需） -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
@@ -7,6 +8,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Shizuku API -->
     <uses-permission android:name="rikka.shizuku.manager.permission.API_V23" />
+
+    <!-- 抄 KSU：miuix-blur 声明 minSdk 33，override 后保持本应用 minSdk 26 -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <application
         android:name=".NetControlApp"
