@@ -1,6 +1,7 @@
 package com.limao.netcontrol.platform.network
 
 import android.util.Log
+import com.limao.netcontrol.data.NetworkRule
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -30,6 +31,12 @@ abstract class IptablesController(
     private var resolveError: String? = null
 
     private var transportCache: Pair<Long, TransportInfo>? = null
+
+    companion object {
+        /** 单 UID 应用脚本的最终验证通过标记（解析 stdout 用）。 */
+        private const val APPLY_VERIFY_OK = "__APPLY_VERIFY_OK__"
+        private const val APPLY_VERIFY_FAIL = "__APPLY_VERIFY_FAIL__"
+    }
 
     // ------------------------------------------------------------------
     // 规则描述
@@ -125,6 +132,183 @@ abstract class IptablesController(
     // ------------------------------------------------------------------
     // NetworkController 实现
     // ------------------------------------------------------------------
+
+    override suspend fun applyRule(rule: NetworkRule): Result<Unit> {
+        val transports = detectTransports().getOrNull()
+        val needsSplit = rule.wifiBlocked || rule.mobileBlocked
+        if (needsSplit && (transports == null || !transports.supportsSplit)) {
+            return Result.failure(IllegalStateException("当前控制模式无法可靠区分 Wi-Fi 与移动数据"))
+        }
+        val desiredIfaces = buildSet {
+            if (rule.wifiBlocked) addAll(transports?.wifiInterfaces.orEmpty())
+            if (rule.mobileBlocked) addAll(transports?.mobileInterfaces.orEmpty())
+        }
+        if (!resolveBinaries()) {
+            return Result.failure(IllegalStateException(iptablesUnavailableReason()))
+        }
+        val bin = iptablesBin
+            ?: return Result.failure(IllegalStateException(iptablesUnavailableReason()))
+        // 差异化 + 单脚本：清理多余、写入缺失、最终验证，一次 Shell 完成
+        val script = buildApplyBlock(
+            uid = rule.uid,
+            desiredUnified = rule.blocked,
+            desiredIfaces = desiredIfaces,
+            bin = bin,
+            bin6 = ip6tablesBin,
+            okMarker = APPLY_VERIFY_OK,
+            failMarker = APPLY_VERIFY_FAIL,
+            failAction = "exit 1"
+        )
+        val r = shell.exec(script, timeoutMs = 30000)
+        if (!r.success || !r.stdout.contains(APPLY_VERIFY_OK)) {
+            Log.e(logTag, "apply rule failed (uid=${rule.uid}): ${r.stderr}")
+            return Result.failure(IllegalStateException("网络规则应用失败（uid=${rule.uid}）"))
+        }
+        return Result.success(Unit)
+    }
+
+    override suspend fun applyRules(rules: List<NetworkRule>): Map<String, Result<Unit>> {
+        if (rules.isEmpty()) return emptyMap()
+        // 共享 UID 的规则在批处理里会互相覆盖（后写为准，但先写者的验证已算出），退回逐条处理
+        if (rules.map { it.uid }.toSet().size != rules.size) {
+            val results = mutableMapOf<String, Result<Unit>>()
+            for (rule in rules) results[rule.packageName] = applyRule(rule)
+            return results
+        }
+        if (!resolveBinaries()) {
+            val failure = Result.failure<Unit>(IllegalStateException(iptablesUnavailableReason()))
+            return rules.associate { it.packageName to failure }
+        }
+        val bin = iptablesBin
+            ?: return rules.associate {
+                it.packageName to Result.failure<Unit>(
+                    IllegalStateException(iptablesUnavailableReason())
+                )
+            }
+        val transports = detectTransports().getOrNull()
+        val results = mutableMapOf<String, Result<Unit>>()
+        val script = StringBuilder()
+        for (rule in rules) {
+            val needsSplit = rule.wifiBlocked || rule.mobileBlocked
+            if (needsSplit && (transports == null || !transports.supportsSplit)) {
+                results[rule.packageName] = Result.failure(
+                    IllegalStateException("当前控制模式无法可靠区分 Wi-Fi 与移动数据")
+                )
+                continue
+            }
+            val desiredIfaces = buildSet {
+                if (rule.wifiBlocked) addAll(transports?.wifiInterfaces.orEmpty())
+                if (rule.mobileBlocked) addAll(transports?.mobileInterfaces.orEmpty())
+            }
+            script.appendLine(
+                buildApplyBlock(
+                    uid = rule.uid,
+                    desiredUnified = rule.blocked,
+                    desiredIfaces = desiredIfaces,
+                    bin = bin,
+                    bin6 = ip6tablesBin,
+                    okMarker = "__UID_${rule.uid}_OK__",
+                    failMarker = "__UID_${rule.uid}_FAIL__",
+                    failAction = ":"
+                )
+            )
+        }
+        if (script.isEmpty()) return results
+        val r = shell.exec(script.toString(), timeoutMs = 120000)
+        for (rule in rules) {
+            if (rule.packageName in results) continue
+            val ok = r.success && r.stdout.contains("__UID_${rule.uid}_OK__")
+            results[rule.packageName] = if (ok) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    IllegalStateException("网络规则应用失败（uid=${rule.uid}）${r.stderr.take(200)}")
+                )
+            }
+        }
+        return results
+    }
+
+    /**
+     * 构建单个 UID 的差异化应用脚本块：清理多余 + 写入缺失 + 最终验证，
+     * 全部在一个 Shell 脚本里完成（一次 su/Shizuku 调用）。
+     *
+     * - 期望存在的规则用 `-C … || -I …`（存在则跳过，不重复写）；
+     * - 不期望的统一规则用 `-D` 循环删净；
+     * - 不期望的分组规则：枚举全部接口，删除不在期望集合里的分组规则（清陈旧规则）；
+     * - 最后验证目标状态：统一规则存在当且仅当期望存在；期望的分组规则都存在；
+     *   不期望的接口上无残留分组规则。验证不通过则标记失败。
+     * IPv4 严格校验；IPv6 尽力（失败不影响结果，与旧行为一致）。
+     */
+    private fun buildApplyBlock(
+        uid: Int,
+        desiredUnified: Boolean,
+        desiredIfaces: Set<String>,
+        bin: String,
+        bin6: String?,
+        okMarker: String,
+        failMarker: String,
+        failAction: String
+    ): String = buildString {
+        // ---- 1. 统一规则 ----
+        if (desiredUnified) {
+            appendLine("$bin -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin -w -I OUTPUT -m owner --uid-owner $uid -j REJECT")
+            bin6?.let {
+                appendLine("$it -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $it -w -I OUTPUT -m owner --uid-owner $uid -j REJECT || true")
+            }
+        } else {
+            appendLine("for i in 1 2 3 4 5 6 7 8 9 10; do $bin -w -D OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done")
+            bin6?.let {
+                appendLine("for i in 1 2 3 4 5 6 7 8 9 10; do $it -w -D OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done || true")
+            }
+        }
+        // ---- 2. 期望的分组规则：存在则跳过，不存在则写入 ----
+        for (iface in desiredIfaces) {
+            appendLine("$bin -w -C OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $bin -w -I OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT")
+            bin6?.let {
+                appendLine("$it -w -C OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || $it -w -I OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT || true")
+            }
+        }
+        // ---- 3. 陈旧分组规则：枚举全部接口，删除不在期望集合里的分组规则 ----
+        appendLine("for iface in \$(ls /sys/class/net 2>/dev/null); do")
+        appendLine("  case \"\$iface\" in")
+        if (desiredIfaces.isNotEmpty()) {
+            appendLine("    ${desiredIfaces.joinToString("|")}) ;;")
+        }
+        appendLine("    *) for i in 1 2 3; do $bin -w -D OUTPUT -o \$iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done ;;")
+        appendLine("  esac")
+        appendLine("done")
+        bin6?.let {
+            appendLine("for iface in \$(ls /sys/class/net 2>/dev/null); do")
+            appendLine("  case \"\$iface\" in")
+            if (desiredIfaces.isNotEmpty()) {
+                appendLine("    ${desiredIfaces.joinToString("|")}) ;;")
+            }
+            appendLine("    *) for i in 1 2 3; do $it -w -D OUTPUT -o \$iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done || true ;;")
+            appendLine("  esac")
+            appendLine("done || true")
+        }
+        // ---- 4. 最终验证（只校验 IPv4，IPv6 尽力不校验） ----
+        appendLine("V_OK=1")
+        if (desiredUnified) {
+            appendLine("$bin -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || V_OK=0")
+        } else {
+            appendLine("$bin -w -C OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 && V_OK=0")
+        }
+        for (iface in desiredIfaces) {
+            appendLine("$bin -w -C OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || V_OK=0")
+        }
+        // 不在期望集合里的接口上不应残留分组规则
+        appendLine("for iface in \$(ls /sys/class/net 2>/dev/null); do")
+        appendLine("  case \"\$iface\" in")
+        if (desiredIfaces.isNotEmpty()) {
+            appendLine("    ${desiredIfaces.joinToString("|")}) ;;")
+        }
+        appendLine("    *) $bin -w -C OUTPUT -o \$iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 && V_OK=0 ;;")
+        appendLine("  esac")
+        appendLine("done")
+        appendLine("if [ \"\$V_OK\" = \"1\" ]; then echo $okMarker; else echo $failMarker; $failAction; fi")
+    }
 
     override suspend fun blockApp(uid: Int): Result<Unit> {
         val bins = binsStrict()
@@ -246,7 +430,7 @@ abstract class IptablesController(
             n.startsWith("wlan") || n.startsWith("wlx") || n == "wifi0"
         }
         val mobile = filtered.filter { n ->
-            listOf("rmnet", "ccmni", "pdp", "wwan", "v4-rmnet").any { n.startsWith(it) }
+            UidRuleDetail.MOBILE_IFACE_PREFIXES.any { n.startsWith(it) }
         }
         val info = TransportInfo(wifi, mobile)
         transportCache = System.currentTimeMillis() to info
@@ -332,7 +516,7 @@ abstract class IptablesController(
     }
 
     /**
-     * 一次 su 调用批量检查多个 UID 的统一禁止规则。
+     * 一次 su 调用批量检查多个 UID 的统一禁止规则（IPv4 + IPv6 并集）。
      * 200 个应用也只需一次 Shell 调用，列表加载不卡顿。
      */
     override suspend fun getBlockedUids(uids: List<Int>): Set<Int> {
@@ -346,25 +530,54 @@ abstract class IptablesController(
             Log.e(logTag, "batch check failed: ${r.stderr}")
             return emptySet()
         }
-        return r.stdout.lines().mapNotNull { it.trim().toIntOrNull() }.toSet()
+        val result = r.stdout.lines().mapNotNull { it.trim().toIntOrNull() }.toMutableSet()
+        // IPv6：尽力合并，失败不影响 IPv4 结果
+        ip6tablesBin?.let { bin6 ->
+            val script6 = "for u in ${uids.joinToString(" ")}; do " +
+                "$bin6 -w -C OUTPUT -m owner --uid-owner \$u -j REJECT >/dev/null 2>&1 && echo \$u; done"
+            val r6 = shell.exec(script6, timeoutMs = 60000)
+            if (r6.success) {
+                result += r6.stdout.lines().mapNotNull { it.trim().toIntOrNull() }
+            } else {
+                Log.w(logTag, "batch check IPv6 failed: ${r6.stderr}")
+            }
+        }
+        return result
     }
 
     /**
      * 一次 su 调用读取 OUTPUT 链全部 UID 规则，解析出每个 UID 的
      * 统一/分组限制详情。应用列表用它一次性拿到全部状态。
+     * IPv4（iptables）必需；IPv6（ip6tables）尽力合并，不能只靠 IPv4 假定 IPv6。
+     * 返回 null 表示读取失败（与“已读取且无规则”的空 map 区分）。
      */
-    override suspend fun getAllUidRules(): Map<Int, UidRuleDetail> {
-        val bin = binsStrict().firstOrNull() ?: return emptyMap()
+    override suspend fun getAllUidRules(): Map<Int, UidRuleDetail>? {
+        val bin = binsStrict().firstOrNull() ?: return null
         val r = shell.exec("$bin -w -S OUTPUT", timeoutMs = 30000)
         if (!r.success) {
             Log.e(logTag, "dump rules failed: ${r.stderr}")
-            return emptyMap()
+            return null
         }
         val result = mutableMapOf<Int, UidRuleDetail>()
+        mergeRulesDump(result, r.stdout)
+        // IPv6：尽力合并进同一快照
+        ip6tablesBin?.let { bin6 ->
+            val r6 = shell.exec("$bin6 -w -S OUTPUT", timeoutMs = 30000)
+            if (r6.success) {
+                mergeRulesDump(result, r6.stdout)
+            } else {
+                Log.w(logTag, "dump IPv6 rules failed: ${r6.stderr}")
+            }
+        }
+        return result
+    }
+
+    /** 把一次 `-S OUTPUT` 的输出解析并合并进快照（IPv4/IPv6 共用）。 */
+    private fun mergeRulesDump(result: MutableMap<Int, UidRuleDetail>, dump: String) {
         // 形如：-A OUTPUT -o wlan0 -m owner --uid-owner 10123 -j REJECT
         val uidRegex = Regex("""--uid-owner\s+(\d+)""")
         val ifaceRegex = Regex("""-o\s+(\S+)""")
-        for (line in r.stdout.lines()) {
+        for (line in dump.lines()) {
             val uid = uidRegex.find(line)?.groupValues?.getOrNull(1)?.toIntOrNull()
                 ?: continue
             if (!line.contains("REJECT")) continue
@@ -379,6 +592,5 @@ abstract class IptablesController(
                 )
             }
         }
-        return result
     }
 }

@@ -29,6 +29,8 @@ class PackageChangeReceiver : BroadcastReceiver() {
         if (pkg == context.packageName) return
         val replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
         val appContext = context.applicationContext
+        // 安装/卸载/更新：共享应用信息缓存失效，下次加载重新扫描
+        (appContext as? com.limao.netcontrol.NetControlApp)?.appRepository?.invalidateAppsCache()
         val pending = goAsync()
 
         when (intent.action) {

@@ -48,10 +48,12 @@ class BootReceiver : BroadcastReceiver() {
                         return@runBlocking
                     }
                     val rules = RuleRepository(context.applicationContext).rulesFlow.first()
+                    // 批处理：单脚本恢复全部规则，按 UID 逐条汇报成功/失败
+                    val results = RuleApplier.applyAll(controller, rules.values.toList())
                     var ok = 0
                     var failed = 0
-                    for ((_, rule) in rules) {
-                        if (RuleApplier.apply(controller, rule).isSuccess) ok++ else failed++
+                    for ((_, result) in results) {
+                        if (result.isSuccess) ok++ else failed++
                     }
                     Log.i(TAG, "boot restore done: ok=$ok failed=$failed total=${rules.size}")
                     if (failed > 0) settings.setPendingRestore(true)
