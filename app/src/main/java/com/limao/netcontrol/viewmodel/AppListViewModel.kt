@@ -129,7 +129,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             SettingsRepository.SortMode.STATUS ->
                 // 一次排序：受限在前（按名称）、允许在后（按名称），稳定且只排一次
                 withStatus.sortedWith(
-                    compareByDescending<Pair<SearchableApp, NetworkStatus>, Boolean> {
+                    compareByDescending<Pair<SearchableApp, NetworkStatus>> {
                         it.second != NetworkStatus.ALLOWED
                     }.thenBy { it.first.nameLower }
                 )
