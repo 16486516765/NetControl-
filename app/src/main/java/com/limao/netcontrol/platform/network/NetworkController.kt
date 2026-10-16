@@ -1,5 +1,7 @@
 package com.limao.netcontrol.platform.network
 
+import com.limao.netcontrol.data.NetworkRule
+
 /**
  * 应用联网状态。只反映通过系统规则实际检测到的状态，
  * 绝不根据 UI 开关伪造。
@@ -75,10 +77,51 @@ interface NetworkController {
     suspend fun getBlockedUids(uids: List<Int>): Set<Int> = emptySet()
 
     /**
-     * 一次性读取全部 UID 的规则详情（统一/分组）。
-     * 默认返回空 map；IptablesController 提供真正实现。
+     * 一次性读取全部 UID 的规则详情（统一/分组，IPv4 + IPv6 合并）。
+     * 返回 null 表示读取失败（与“已读取且无规则”的空 map 区分）；
+     * 默认返回 null；IptablesController 提供真正实现。
      */
-    suspend fun getAllUidRules(): Map<Int, UidRuleDetail> = emptyMap()
+    suspend fun getAllUidRules(): Map<Int, UidRuleDetail>? = null
+
+    /**
+     * 把一条 [NetworkRule] 应用到系统（差异化：只删多余、只加缺失，最后验证）。
+     * 默认实现是旧序列（先清理再重写），供不支持差异化的控制器使用；
+     * IptablesController 覆盖为单脚本差异化实现。
+     */
+    suspend fun applyRule(rule: NetworkRule): Result<Unit> {
+        // 1. 清理旧规则，保证幂等
+        unblockApp(rule.uid).onFailure {
+            return Result.failure(it)
+        }
+        // 2. 统一禁止
+        if (rule.blocked) {
+            return blockApp(rule.uid)
+        }
+        // 3. 分组规则（设备不支持时返回 failure，调用方负责提示）
+        if (rule.wifiBlocked) {
+            setWifiBlocked(rule.uid, true).onFailure {
+                return Result.failure(it)
+            }
+        }
+        if (rule.mobileBlocked) {
+            setMobileBlocked(rule.uid, true).onFailure {
+                return Result.failure(it)
+            }
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * 批量应用多条规则（开机恢复等场景），按包名逐条汇报成功/失败。
+     * 默认实现逐条调用 [applyRule]；IptablesController 覆盖为单脚本批处理实现。
+     */
+    suspend fun applyRules(rules: List<NetworkRule>): Map<String, Result<Unit>> {
+        val results = mutableMapOf<String, Result<Unit>>()
+        for (rule in rules) {
+            results[rule.packageName] = applyRule(rule)
+        }
+        return results
+    }
 }
 
 /** 单个 UID 在系统中的规则详情（批量查询用）。 */
@@ -93,7 +136,7 @@ data class UidRuleDetail(
     private fun isWifiIface(n: String) =
         n.startsWith("wlan") || n.startsWith("wlx") || n == "wifi0"
     private fun isMobileIface(n: String) =
-        listOf("rmnet", "ccmni", "pdp", "wwan", "v4-rmnet").any { n.startsWith(it) }
+        MOBILE_IFACE_PREFIXES.any { n.startsWith(it) }
 
     val wifiBlockedOnly: Boolean get() =
         !unifiedBlocked && ifaces.isNotEmpty() &&
@@ -101,4 +144,14 @@ data class UidRuleDetail(
     val mobileBlockedOnly: Boolean get() =
         !unifiedBlocked && ifaces.isNotEmpty() &&
             ifaces.all { isMobileIface(it) }
+
+    /** 任一 Wi-Fi 接口上有分组规则（不含统一规则；与旧 isWifiBlocked() 语义一致）。 */
+    val wifiBlocked: Boolean get() = ifaces.any { isWifiIface(it) }
+    /** 任一移动数据接口上有分组规则（不含统一规则；与旧 isMobileBlocked() 语义一致）。 */
+    val mobileBlocked: Boolean get() = ifaces.any { isMobileIface(it) }
+
+    companion object {
+        /** 移动数据接口名前缀（companion 常量，避免每次判断都新建 list）。 */
+        internal val MOBILE_IFACE_PREFIXES = listOf("rmnet", "ccmni", "pdp", "wwan", "v4-rmnet")
+    }
 }

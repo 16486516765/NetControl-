@@ -80,10 +80,10 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         .debounce(150)
         .distinctUntilChanged()
 
-    /** 列表行：应用 × 规则 × 系统实际状态，支持搜索/排序/过滤。 */
+    /** 列表行基础数据：应用 × 规则 × 系统实际状态（不含操作中/错误等局部 UI 态）。 */
     @OptIn(FlowPreview::class)
-    val rows: StateFlow<List<AppRow>> = combine(
-        _apps, rules, _ruleDetails, debouncedQuery, _errors, _operating,
+    private val baseRows: StateFlow<List<AppRow>> = combine(
+        _apps, rules, _ruleDetails, debouncedQuery,
         settings.showSystemAppsFlow, settings.showBlockedOnlyFlow, settings.sortModeFlow
     ) { args ->
         @Suppress("UNCHECKED_CAST")
@@ -91,11 +91,9 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         val ruleMap = args[1] as Map<String, NetworkRule>
         val details = args[2] as Map<Int, UidRuleDetail>?
         val query = (args[3] as String).trim().lowercase()
-        val errMap = args[4] as Map<String, String>
-        val operatingSet = args[5] as Set<String>
-        val showSystem = args[6] as Boolean
-        val blockedOnly = args[7] as Boolean
-        val sortMode = args[8] as String
+        val showSystem = args[4] as Boolean
+        val blockedOnly = args[5] as Boolean
+        val sortMode = args[6] as String
 
         var list = apps.asSequence()
         if (!showSystem) list = list.filter { !it.info.isSystemApp }
@@ -106,28 +104,10 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val privileged = session.controller !is UnsupportedNetworkController
-        // 一、3 优化：先排序（用预计算字段），最后再 map 成 AppRow，避免排序时反复 lowercase
-        var sorted = list.toList()
-        sorted = when (sortMode) {
-            SettingsRepository.SortMode.PACKAGE ->
-                sorted.sortedBy { it.pkgLower }
-            SettingsRepository.SortMode.STATUS ->
-                // 状态排序需要先算出 status，这里用两阶段：先按名称排，再稳定排序按状态
-                sorted.sortedBy { it.nameLower }
-                    .sortedWith(compareByDescending<SearchableApp> {
-                        val d = details?.get(it.info.uid)
-                        val s = when {
-                            !privileged -> NetworkStatus.UNKNOWN
-                            details == null -> NetworkStatus.UNKNOWN
-                            d == null -> NetworkStatus.ALLOWED
-                            d.unifiedBlocked -> NetworkStatus.BLOCKED
-                            else -> NetworkStatus.ALLOWED
-                        }
-                        s != NetworkStatus.ALLOWED
-                    })
-            else -> sorted.sortedBy { it.nameLower }
-        }
-        var rows = sorted.asSequence().map { searchable ->
+        // 状态算一次：先为每项算出 status，再一次排序（不在比较器里反复算）。
+        // STATUS 排序用完整状态：统一封禁/分组限制都算“受限”排前面，ALLOWED 排后面
+        // （旧逻辑只看 unifiedBlocked，会把分组限制误当成 ALLOWED 排序）。
+        val withStatus = list.map { searchable ->
             val info = searchable.info
             val detail = details?.get(info.uid)
             val status = when {
@@ -141,12 +121,27 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                 detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
                 else -> NetworkStatus.ALLOWED
             }
+            searchable to status
+        }
+        val sorted = when (sortMode) {
+            SettingsRepository.SortMode.PACKAGE ->
+                withStatus.sortedBy { it.first.pkgLower }
+            SettingsRepository.SortMode.STATUS ->
+                // 一次排序：受限在前（按名称）、允许在后（按名称），稳定且只排一次
+                withStatus.sortedWith(
+                    compareByDescending<Pair<SearchableApp, NetworkStatus>, Boolean> {
+                        it.second != NetworkStatus.ALLOWED
+                    }.thenBy { it.first.nameLower }
+                )
+            else -> withStatus.sortedBy { it.first.nameLower }
+        }
+        var rows = sorted.asSequence().map { (searchable, status) ->
             AppRow(
-                info = info,
-                rule = ruleMap[info.packageName],
+                info = searchable.info,
+                rule = ruleMap[searchable.info.packageName],
                 status = status,
-                error = errMap[info.packageName],
-                operating = operatingSet.contains(info.packageName)
+                error = null,
+                operating = false
             )
         }
         if (blockedOnly) {
@@ -158,6 +153,25 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         }
         rows.toList()
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 列表行：基础列表 + 局部 UI 态（某行的操作中/错误）。
+     * 操作态变化时只做一次 copy 附加，不再重新过滤/排序整张列表。
+     */
+    val rows: StateFlow<List<AppRow>> = combine(
+        baseRows, _errors, _operating
+    ) { base, errMap, operatingSet ->
+        if (errMap.isEmpty() && operatingSet.isEmpty()) {
+            base
+        } else {
+            base.map {
+                it.copy(
+                    error = errMap[it.info.packageName],
+                    operating = operatingSet.contains(it.info.packageName)
+                )
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun setSearchQuery(q: String) {
         _searchQuery.value = q
@@ -184,16 +198,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                         pkgLower = it.packageName.lowercase()
                     )
                 }
-                refreshStatuses(apps)
-                // 性能优化：后台预加载所有应用图标，滑动时直接命中内存缓存
-                launch {
-                    try {
-                        val ctx = getApplication<Application>().applicationContext
-                        com.limao.netcontrol.ui.IconLoader.preload(
-                            ctx, apps.map { it.packageName }
-                        )
-                    } catch (_: Exception) { }
-                }
+                refreshStatuses()
             } catch (e: Exception) {
                 Log.e(TAG, "load apps failed", e)
                 _loadError.value = e.message ?: "加载应用列表失败"
@@ -204,19 +209,18 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 包变更后强制刷新。 */
+    /** 包变更后强制刷新（应用列表缓存与 AppRepository 缓存一起失效）。 */
     fun invalidateCache() {
         loaded = false
+        appRepository.invalidateAppsCache()
     }
 
-    /** 刷新系统实际状态（一次 su 调用查全部 UID）。失败时设为 null，UI 显示未知而非虚假的允许。 */
-    fun refreshStatuses(apps: List<AppInfo> = _apps.value.map { it.info }) {
+    /** 刷新系统实际状态（一次 su 调用查全部 UID 的 IPv4+IPv6 快照）。失败时设为 null，UI 显示未知而非虚假的允许。 */
+    fun refreshStatuses() {
         viewModelScope.launch {
             try {
-                val result = session.controller.getAllUidRules()
-                // getAllUidRules 失败返回空 map 时无法区分"无规则"和"读取失败"，
-                // 这里通过检查 controller 是否可用做二次确认
-                _ruleDetails.value = result
+                // getAllUidRules 返回 null 表示读取失败（与“已读取且无规则”的空 map 区分）
+                _ruleDetails.value = session.controller.getAllUidRules()
             } catch (e: Exception) {
                 Log.e(TAG, "refresh statuses failed", e)
                 _ruleDetails.value = null
