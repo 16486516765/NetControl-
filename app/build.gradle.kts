@@ -2,13 +2,14 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Base64
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android") version "2.4.10"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
+    id("org.jetbrains.kotlin.android") version "2.4.20"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.20"
 }
 
 android {
     namespace = "com.limao.netcontrol"
-    compileSdk = 36
+    // miuix 0.9.4 要求 compileSdk 37+（AAR metadata 校验）；targetSdk 保持 36，避免 Android 37 行为变更
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.limao.netcontrol"
