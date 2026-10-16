@@ -59,7 +59,8 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun load(packageName: String, cached: AppInfo?) {
         viewModelScope.launch {
-            val info = cached ?: appRepository.loadApps().find { it.packageName == packageName }
+            // 缓存缺失时只查单个包，不全量扫描所有应用
+            val info = cached ?: appRepository.loadApp(packageName)
             if (info == null) {
                 _applyError.value = "应用不存在（可能已卸载）"
                 return@launch
@@ -69,7 +70,11 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 从系统读取实际状态，并用持久化规则初始化草稿。 */
+    /**
+     * 从系统读取实际状态，并用持久化规则初始化草稿。
+     * 一次规则快照（IPv4+IPv6）推导状态/Wi-Fi/移动数据三项，不再连续调
+     * getStatus()/isWifiBlocked()/isMobileBlocked() 做三次查询。
+     */
     fun refreshActual(info: AppInfo? = null) {
         val target = info ?: _info.value ?: return
         viewModelScope.launch {
@@ -79,9 +84,23 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             try {
-                _actualStatus.value = controller.getStatus(target.uid)
-                _actualWifiBlocked.value = controller.isWifiBlocked(target.uid)
-                _actualMobileBlocked.value = controller.isMobileBlocked(target.uid)
+                val snapshot = controller.getAllUidRules()
+                if (snapshot == null) {
+                    _actualStatus.value = NetworkStatus.ERROR
+                    return@launch
+                }
+                val detail = snapshot[target.uid]
+                _actualStatus.value = when {
+                    detail == null -> NetworkStatus.ALLOWED
+                    detail.unifiedBlocked -> NetworkStatus.BLOCKED
+                    detail.wifiBlockedOnly -> NetworkStatus.WIFI_ONLY_BLOCKED
+                    detail.mobileBlockedOnly -> NetworkStatus.MOBILE_ONLY_BLOCKED
+                    detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
+                    else -> NetworkStatus.ALLOWED
+                }
+                // 任一 Wi-Fi/移动接口上有分组规则（不含统一规则，与旧 isWifiBlocked/isMobileBlocked 语义一致）
+                _actualWifiBlocked.value = detail?.wifiBlocked == true
+                _actualMobileBlocked.value = detail?.mobileBlocked == true
             } catch (e: Exception) {
                 Log.e(TAG, "refreshActual failed", e)
                 _actualStatus.value = NetworkStatus.ERROR
