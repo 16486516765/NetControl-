@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Base64
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android") version "2.4.20"
+    // AGP 9.0+ 内置 Kotlin 支持，不再需要 org.jetbrains.kotlin.android（抄 KSU：app 只申 compose.compiler）
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.20"
 }
 
