@@ -21,6 +21,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val driftFixed = session.driftFixed
     val pendingRestore = settings.pendingRestoreFlow
     val themeMode = settings.themeModeFlow
+    val uiMode = settings.uiModeFlow
 
     init {
         session.detect(viewModelScope)

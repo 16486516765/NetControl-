@@ -78,7 +78,14 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
-    // 纯 Material 3，不再使用玻璃拟态库
+    // MIUI 风格（抄 KernelSU）：Miuix KMP 组件库 + 液态玻璃 blur
+    // miuix-ui：MiuixTheme / 基础组件；miuix-blur：液态玻璃 backdrop / shader
+    // miuix-icons/nav/preference：与 KSU 保持一致的完整依赖集
+    implementation(libs.miuix.ui)
+    implementation(libs.miuix.icons)
+    implementation(libs.miuix.nav)
+    implementation(libs.miuix.preference)
+    implementation(libs.miuix.blur)
 }
 
     kotlin {

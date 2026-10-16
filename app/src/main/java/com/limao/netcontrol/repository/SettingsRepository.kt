@@ -2,6 +2,7 @@ package com.limao.netcontrol.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.limao.netcontrol.ui.UiMode
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -21,6 +22,8 @@ class SettingsRepository(private val context: Context) {
     private val bootRestoreKey = "boot_restore"
     private val themeModeKey = "theme_mode"
     private val pendingRestoreKey = "pending_restore"
+    /** 界面风格（抄 KSU 的 ui_mode）：miuix / material，默认 miuix */
+    private val uiModeKey = "ui_mode"
 
     private fun booleanFlow(key: String): Flow<Boolean> = callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, k ->
@@ -46,6 +49,7 @@ class SettingsRepository(private val context: Context) {
     val bootRestoreFlow: Flow<Boolean> = booleanFlow(bootRestoreKey)
     val themeModeFlow: Flow<String> = stringFlow(themeModeKey, ThemeMode.SYSTEM)
     val pendingRestoreFlow: Flow<Boolean> = booleanFlow(pendingRestoreKey)
+    val uiModeFlow: Flow<String> = stringFlow(uiModeKey, UiMode.DEFAULT_VALUE)
 
     suspend fun setShowSystemApps(v: Boolean) {
         prefs.edit().putBoolean(showSystemAppsKey, v).apply()
@@ -61,6 +65,9 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setThemeMode(v: String) {
         prefs.edit().putString(themeModeKey, v).apply()
+    }
+    suspend fun setUiMode(v: String) {
+        prefs.edit().putString(uiModeKey, v).apply()
     }
     suspend fun setPendingRestore(v: Boolean) {
         prefs.edit().putBoolean(pendingRestoreKey, v).apply()

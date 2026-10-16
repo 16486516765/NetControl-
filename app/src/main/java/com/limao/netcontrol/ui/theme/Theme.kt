@@ -1,11 +1,16 @@
 package com.limao.netcontrol.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import com.limao.netcontrol.ui.UiMode
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeColorSpec
+import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF0066FF),
@@ -28,13 +33,41 @@ private val DarkColors = darkColorScheme(
     error = Color(0xFFFF453A)
 )
 
+/**
+ * 主题：按界面风格分支（抄 KernelSU 的 KernelSUTheme 机制，简化版）。
+ *
+ * - MIUI：外层 MiuixTheme（液态玻璃底栏从它取色）+ 内层 MaterialTheme
+ *   （现有 Material 3 组件继续工作，色值与 MIUI 的蓝保持一致）。
+ *   不做 KSU 的 Monet / 调色板复杂逻辑，只跟 darkTheme + 主色。
+ * - 谷歌：纯 MaterialTheme，与原来一致。
+ */
 @Composable
 fun NetControlTheme(
+    uiMode: UiMode = UiMode.Miuix,
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        content = content
-    )
+    when (uiMode) {
+        UiMode.Miuix -> {
+            val controller = ThemeController(
+                if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light,
+                keyColor = null,
+                isDark = darkTheme,
+                paletteStyle = ThemePaletteStyle.TonalSpot,
+                colorSpec = ThemeColorSpec.Spec2025,
+            )
+            MiuixTheme(controller = controller) {
+                MaterialTheme(
+                    colorScheme = if (darkTheme) DarkColors else LightColors,
+                    content = content
+                )
+            }
+        }
+        UiMode.Material -> {
+            MaterialTheme(
+                colorScheme = if (darkTheme) DarkColors else LightColors,
+                content = content
+            )
+        }
+    }
 }

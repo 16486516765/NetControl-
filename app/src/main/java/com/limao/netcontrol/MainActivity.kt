@@ -9,9 +9,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -22,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -45,14 +50,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
 import com.limao.netcontrol.repository.SettingsRepository
+import com.limao.netcontrol.ui.UiMode
 import com.limao.netcontrol.ui.detail.AppDetailScreen
 import com.limao.netcontrol.ui.glass.BottomTab
 import com.limao.netcontrol.ui.glass.GlassBottomBar
 import com.limao.netcontrol.ui.glass.GlassScaffold
 import com.limao.netcontrol.ui.home.HomeScreen
+import com.limao.netcontrol.ui.liquid.LiquidBottomBar
 import com.limao.netcontrol.ui.rules.RulesScreen
 import com.limao.netcontrol.ui.settings.SettingsScreen
 import com.limao.netcontrol.ui.theme.NetControlTheme
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.limao.netcontrol.viewmodel.AppDetailViewModel
 import com.limao.netcontrol.viewmodel.AppListViewModel
 import com.limao.netcontrol.viewmodel.MainViewModel
@@ -183,6 +192,9 @@ class MainActivity : ComponentActivity() {
             SettingsRepository.ThemeMode.DARK -> true
             else -> isSystemInDarkTheme()
         }
+        // 界面风格（抄 KSU 的 UiMode）：MIUI = 液态玻璃底栏 + 弹簧转场，谷歌 = Material 底栏 + tween 淡入淡出
+        val uiModeValue by mainViewModel.uiMode.collectAsStateWithLifecycle(initialValue = UiMode.DEFAULT_VALUE)
+        val uiMode = UiMode.fromValue(uiModeValue)
 
         val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
         val current = backStack.lastOrNull() ?: Screen.Home
@@ -200,18 +212,53 @@ class MainActivity : ComponentActivity() {
             backStack.removeLastOrNull()
         }
 
-        NetControlTheme(darkTheme) {
+        NetControlTheme(uiMode = uiMode, darkTheme = darkTheme) {
+            // 液态玻璃底栏的采样背景（抄 KSU MainActivity 的 backdrop 接线）：
+            // backdrop 采样当前页面内容，底栏的 lens/vibrancy 在它上面做折射。
+            // 只在 MIUI 模式下生效，谷歌模式不采样。
+            // 注意：颜色必须在 lambda 外读出——rememberLayerBackdrop 的 lambda 是
+            // DrawScope 绘制块（非 @Composable），不能在里面读 MaterialTheme。
+            val backdropSurfaceColor = MaterialTheme.colorScheme.surface
+            val backdrop = rememberLayerBackdrop {
+                drawRect(backdropSurfaceColor)
+                drawContent()
+            }
             GlassScaffold {
                 Box(Modifier.fillMaxSize()) {
-                    // 页面转场：淡入淡出。只做透明度动画，开销小。
+                    // 页面转场：按界面风格分支。
+                    // MIUI：弹簧 + 轻微缩放（Miuix 手感，带一点回弹）；
+                    // 谷歌：tween 220ms 淡入淡出（保持原有）。
                     AnimatedContent(
                         targetState = current,
                         transitionSpec = {
-                            fadeIn(animationSpec = tween(durationMillis = 220)) togetherWith
-                                fadeOut(animationSpec = tween(durationMillis = 220))
+                            if (uiMode == UiMode.Miuix) {
+                                val springSpec = spring<Float>(
+                                    stiffness = Spring.StiffnessMedium,
+                                    dampingRatio = 0.85f
+                                )
+                                (fadeIn(animationSpec = springSpec) +
+                                    scaleIn(
+                                        initialScale = 0.98f,
+                                        animationSpec = springSpec
+                                    )) togetherWith
+                                    (fadeOut(animationSpec = springSpec) +
+                                        scaleOut(
+                                            targetScale = 0.98f,
+                                            animationSpec = springSpec
+                                        ))
+                            } else {
+                                fadeIn(animationSpec = tween(durationMillis = 220)) togetherWith
+                                    fadeOut(animationSpec = tween(durationMillis = 220))
+                            }
                         },
                         label = "screenTransition",
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // MIUI 模式：页面内容作为液态玻璃底栏的采样层（抄 KSU 的 pager 接线）
+                            .then(
+                                if (uiMode == UiMode.Miuix) Modifier.layerBackdrop(backdrop)
+                                else Modifier
+                            )
                     ) { screen ->
                         when (val s = screen) {
                         is Screen.Home -> HomeScreen(
@@ -258,28 +305,45 @@ class MainActivity : ComponentActivity() {
                             is Screen.Rules -> 1
                             else -> 2
                         }
-                        GlassBottomBar(
-                            tabs = listOf(
-                                BottomTab("应用", Icons.Filled.List),
-                                BottomTab("规则", Icons.Filled.Shield),
-                                BottomTab("设置", Icons.Filled.Settings)
-                            ),
-                            selectedIndex = selectedIndex,
-                            onSelect = { index ->
-                                backStack.clear()
-                                backStack.add(
-                                    when (index) {
-                                        0 -> Screen.Home
-                                        1 -> Screen.Rules
-                                        else -> Screen.Settings
-                                    }
-                                )
-                            },
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .navigationBarsPadding()
-                                .padding(bottom = 12.dp)
+                        val tabs = listOf(
+                            BottomTab("应用", Icons.Filled.List),
+                            BottomTab("规则", Icons.Filled.Shield),
+                            BottomTab("设置", Icons.Filled.Settings)
                         )
+                        val navigateToTab: (Int) -> Unit = { index ->
+                            backStack.clear()
+                            backStack.add(
+                                when (index) {
+                                    0 -> Screen.Home
+                                    1 -> Screen.Rules
+                                    else -> Screen.Settings
+                                }
+                            )
+                        }
+                        if (uiMode == UiMode.Miuix) {
+                            // MIUI 模式：液态玻璃悬浮底栏（移植自 KSU 的 FloatingBottomBar）
+                            LiquidBottomBar(
+                                tabs = tabs,
+                                selectedIndex = selectedIndex,
+                                isDark = darkTheme,
+                                backdrop = backdrop,
+                                onSelect = navigateToTab,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding()
+                            )
+                        } else {
+                            // 谷歌模式：现有 Material 3 底栏
+                            GlassBottomBar(
+                                tabs = tabs,
+                                selectedIndex = selectedIndex,
+                                onSelect = navigateToTab,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding()
+                                    .padding(bottom = 12.dp)
+                            )
+                        }
                     }
                 }
             }

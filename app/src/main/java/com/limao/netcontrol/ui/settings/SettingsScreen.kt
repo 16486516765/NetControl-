@@ -32,6 +32,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.limao.netcontrol.platform.network.PrivilegeManager
 import com.limao.netcontrol.repository.SettingsRepository
+import com.limao.netcontrol.ui.UiMode
 import com.limao.netcontrol.ui.glass.GlassCard
 import com.limao.netcontrol.ui.glass.LiquidButton
 import com.limao.netcontrol.ui.glass.LiquidToggle
@@ -52,6 +53,7 @@ fun SettingsScreen(
     val sortMode by settingsViewModel.sortMode.collectAsStateWithLifecycle(initialValue = "name")
     val bootRestore by settingsViewModel.bootRestore.collectAsStateWithLifecycle(initialValue = false)
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
+    val uiMode by settingsViewModel.uiMode.collectAsStateWithLifecycle(initialValue = UiMode.DEFAULT_VALUE)
     val pendingRestore by settingsViewModel.pendingRestore.collectAsStateWithLifecycle(initialValue = false)
     var restoreMsg by remember { mutableStateOf<String?>(null) }
     var bgMsg by remember { mutableStateOf<String?>(null) }
@@ -196,6 +198,27 @@ fun SettingsScreen(
                     settingsViewModel.setThemeMode(SettingsRepository.ThemeMode.DARK)
                 }
             }
+            Text(
+                "界面风格",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
+            )
+            // 风格切换（抄 KSU 设置页的 UiMode 切换：MIUI / 谷歌二选一）
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SortChip("MIUI", uiMode == UiMode.Miuix.value) {
+                    settingsViewModel.setUiMode(UiMode.Miuix.value)
+                }
+                SortChip("谷歌", uiMode == UiMode.Material.value) {
+                    settingsViewModel.setUiMode(UiMode.Material.value)
+                }
+            }
+            Text(
+                "MIUI：液态玻璃底栏 + 弹簧动画；谷歌：Material 3 底栏 + 淡入淡出。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
 
         // 关于
@@ -203,7 +226,10 @@ fun SettingsScreen(
             AboutRow("应用名称", "青栅")
             AboutRow("版本号", "1.0.0 (1)")
             AboutRow("包名", "com.limao.netcontrol")
-            AboutRow("UI 驱动", "Material 3")
+            AboutRow(
+                "UI 驱动",
+                if (uiMode == UiMode.Miuix.value) "MIUI" else "Material 3"
+            )
             AboutRow("网络控制", "iptables（Root / Shizuku）")
             Spacer(Modifier.height(4.dp))
             Text(
