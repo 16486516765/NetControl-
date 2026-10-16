@@ -27,9 +27,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         session.detect(viewModelScope)
     }
 
-    /** 设置页“重新检测权限”。 */
+    /** 设置页“重新检测权限”（完整检测 + 规则一致性校验）。 */
     fun redetect() {
         session.clearPrivilegeCache()
         session.detect(viewModelScope)
+    }
+
+    /**
+     * 回到前台的轻量权限刷新：只重检特权状态，不跑完整规则校验。
+     * 调用前同样清 Root 缓存，否则读到的是旧缓存、发现不了权限撤销。
+     */
+    fun refreshPrivilege() {
+        session.clearPrivilegeCache()
+        session.detect(viewModelScope, verifyRules = false)
     }
 }

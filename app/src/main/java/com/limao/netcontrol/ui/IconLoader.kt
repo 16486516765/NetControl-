@@ -22,53 +22,65 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.Collections
 
-/** 应用图标内存缓存（最多 600 个，覆盖全部应用），IO 线程解码。 */
+/** 应用图标内存缓存（按总字节数预算，LRU 淘汰），IO 线程解码。 */
 object IconLoader {
-    private const val MAX_SIZE = 600
-    /** 固定高分辨率解码，缓存按包名键入，UI 按需缩放。 */
-    private const val PRELOAD_PX = 192
-    private val cache: MutableMap<String, ImageBitmap> = Collections.synchronizedMap(
-        object : LinkedHashMap<String, ImageBitmap>(128, 0.75f, true) {
-            override fun removeEldestEntry(
-                eldest: MutableMap.MutableEntry<String, ImageBitmap>?
-            ): Boolean = size > MAX_SIZE
-        }
-    )
+    /**
+     * 图标缓存总字节预算约 12 MiB。
+     * 按需解码（默认 96px、ARGB_8888 约 36 KiB/张）可容纳约 340 张；
+     * 不再全量预加载 600 张 192px（约 84 MiB）。
+     */
+    private const val MAX_CACHE_BYTES = 12 * 1024 * 1024
+    private const val MIN_PX = 32
+    private const val MAX_PX = 256
+    private val cacheLock = Any()
+    private val cache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {}
+    private var cacheBytes = 0L
     /** 限制并发解码数，避免滑动时 IO 拥堵。 */
     private val semaphore = kotlinx.coroutines.sync.Semaphore(4)
 
+    private fun getFromCache(key: String): ImageBitmap? = synchronized(cacheLock) { cache[key] }
+
+    private fun putToCache(key: String, bitmap: ImageBitmap, bytes: Long) =
+        synchronized(cacheLock) {
+            val old = cache.put(key, bitmap)
+            if (old != null) {
+                // 同 key 覆盖：先减掉旧图字节（按旧图尺寸估算）
+                cacheBytes -= old.width * old.height * 4L
+            }
+            cacheBytes += bytes
+            // 淘汰最久未使用，直到回到预算内（至少保留最新一张）
+            while (cacheBytes > MAX_CACHE_BYTES && cache.size > 1) {
+                val eldest = cache.entries.iterator().next()
+                cache.remove(eldest.key)
+                cacheBytes -= eldest.value.width * eldest.value.height * 4L
+            }
+        }
+
+    /**
+     * 按需加载图标。px 真正参与解码（按目标尺寸解码，不再固定 192px），
+     * 缓存键包含包名 + 尺寸，不同尺寸分别缓存。
+     */
     suspend fun load(
         context: android.content.Context,
         packageName: String,
         px: Int = 96
     ): ImageBitmap? = withContext(Dispatchers.IO) {
-        cache[packageName]?.let { return@withContext it }
+        val targetPx = px.coerceIn(MIN_PX, MAX_PX)
+        val key = "$packageName@$targetPx"
+        getFromCache(key)?.let { return@withContext it }
         semaphore.acquire()
         try {
             // double-check after acquiring
-            cache[packageName]?.let { return@withContext it }
+            getFromCache(key)?.let { return@withContext it }
             val drawable = context.packageManager.getApplicationIcon(packageName)
-            val bitmap = drawable.toBitmap(PRELOAD_PX, PRELOAD_PX, Bitmap.Config.ARGB_8888).asImageBitmap()
-            cache[packageName] = bitmap
+            val bitmap = drawable.toBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888).asImageBitmap()
+            putToCache(key, bitmap, targetPx * targetPx * 4L)
             bitmap
         } catch (_: Exception) {
             null
         } finally {
             semaphore.release()
-        }
-    }
-
-    /** 后台预加载指定包名的图标，供列表滑动时直接命中缓存。 */
-    suspend fun preload(
-        context: android.content.Context,
-        packageNames: List<String>
-    ) = withContext(Dispatchers.IO) {
-        packageNames.forEach { pkg ->
-            if (!cache.containsKey(pkg)) {
-                load(context, pkg)
-            }
         }
     }
 }

@@ -12,11 +12,18 @@ import com.limao.netcontrol.platform.network.UnsupportedNetworkController
 import com.limao.netcontrol.repository.AppRepository
 import com.limao.netcontrol.repository.RuleRepository
 import com.limao.netcontrol.repository.SettingsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 全局会话：持有特权检测结果、当前网络控制器、规则校验。
@@ -46,25 +53,58 @@ class NetControlSession(
     private val _driftFixed = MutableStateFlow(0)
     val driftFixed: StateFlow<Int> = _driftFixed.asStateFlow()
 
-    /** 按 Root > Shizuku > 无特权检测，并做启动规则校验。 */
-    fun detect(viewModelScope: kotlinx.coroutines.CoroutineScope) {
-        viewModelScope.launch {
-            _privilege.value = PrivilegeManager.Privilege.Detecting
-            _startupVerified.value = false
-            try {
-                val p = privilegeManager.detectPrivilege()
-                _privilege.value = p
-                controller = privilegeManager.createController(p)
-                Log.i(TAG, "privilege=$p controller=${controller.controllerName}")
-                _splitSupported.value =
-                    if (controller is UnsupportedNetworkController) false
-                    else controller.detectTransports().getOrNull()?.supportsSplit == true
-                verifyRulesOnStartup()
-            } catch (e: Exception) {
-                Log.e(TAG, "detect failed", e)
-                _privilege.value = PrivilegeManager.Privilege.None
-                controller = UnsupportedNetworkController()
-            } finally {
+    // 检测单飞：串行化 detect，避免多次 detect 同时覆盖 controller、重复校验规则。
+    private val detectMutex = Mutex()
+    private var detectJob: Job? = null
+    private var detectJobIsFull = false
+
+    /**
+     * 检测特权并刷新控制器。
+     *
+     * @param verifyRules 是否运行完整规则一致性校验。首次取得权限、用户主动修复、
+     *   明确需要同步时用 true；普通回到前台的轻量权限刷新用 false（只重检特权状态）。
+     * 单飞规则：已有完整检测在跑时，轻量请求直接复用；已有轻量检测在跑时，
+     * 完整请求取消轻量的、取而代之；同级重复请求直接复用，不重复跑。
+     */
+    fun detect(viewModelScope: CoroutineScope, verifyRules: Boolean = true) {
+        val current = detectJob
+        if (current?.isActive == true) {
+            if (verifyRules && !detectJobIsFull) {
+                current.cancel()
+            } else {
+                return
+            }
+        }
+        detectJobIsFull = verifyRules
+        detectJob = viewModelScope.launch {
+            detectMutex.withLock {
+                detectInternal(verifyRules)
+            }
+        }
+    }
+
+    /** 按 Root > Shizuku > 无特权检测；verifyRules=true 时做启动规则校验。 */
+    private suspend fun detectInternal(verifyRules: Boolean) {
+        _privilege.value = PrivilegeManager.Privilege.Detecting
+        _startupVerified.value = false
+        try {
+            val p = privilegeManager.detectPrivilege()
+            _privilege.value = p
+            controller = privilegeManager.createController(p)
+            Log.i(TAG, "privilege=$p controller=${controller.controllerName}")
+            _splitSupported.value =
+                if (controller is UnsupportedNetworkController) false
+                else controller.detectTransports().getOrNull()?.supportsSplit == true
+            if (verifyRules) verifyRulesOnStartup()
+        } catch (e: Exception) {
+            // 取消必须向上传递，不能吞掉后伪装成“无特权”
+            if (e is CancellationException) throw e
+            Log.e(TAG, "detect failed", e)
+            _privilege.value = PrivilegeManager.Privilege.None
+            controller = UnsupportedNetworkController()
+        } finally {
+            // 被取消时不标记已验证，等待替代的那次检测重新完成
+            if (currentCoroutineContext().isActive) {
                 _startupVerified.value = true
             }
         }
@@ -89,9 +129,13 @@ class NetControlSession(
         val rules = ruleRepository.rulesFlow.first()
         if (rules.isEmpty()) return
         var fixed = 0
-        val blockedUids = (controller as? com.limao.netcontrol.platform.network.IptablesController)
-            ?.getBlockedUids(rules.values.map { it.uid }.distinct())
-            .orEmpty()
+        // 一次快照拿到全部 UID 的实际状态（IPv4+IPv6），不再逐 UID 调 isAppBlocked()
+        // 做多次 -C 查询。快照读取失败时跳过本轮校验（不盲目重应用），等下次检测再试。
+        val snapshot = controller.getAllUidRules()
+        if (snapshot == null) {
+            Log.w(TAG, "skip verify: rules snapshot unavailable")
+            return
+        }
         for ((pkg, rule) in rules) {
             // 1. 应用已卸载 → 清理规则
             val currentUid = appRepository.getUid(pkg)
@@ -107,10 +151,9 @@ class NetControlSession(
                 ruleRepository.saveRule(effectiveRule)
                 Log.i(TAG, "uid changed $pkg: ${rule.uid} -> $currentUid")
             }
-            // 3. 系统实际规则与持久化规则对比
+            // 3. 系统实际规则与持久化规则对比（用快照，不逐 UID 查询）
             val expectedBlocked = effectiveRule.hasAnyRestriction
-            val actualBlocked = blockedUids.contains(effectiveRule.uid) ||
-                controller.isAppBlocked(effectiveRule.uid)
+            val actualBlocked = snapshot[effectiveRule.uid]?.hasAnyRule == true
             if (expectedBlocked && !actualBlocked) {
                 // 系统规则丢失 → 重新应用
                 Log.w(TAG, "rule lost for $pkg, re-applying")
@@ -125,13 +168,15 @@ class NetControlSession(
         if (fixed > 0) Log.i(TAG, "startup verify fixed $fixed rules")
     }
 
-    /** 开机后待恢复：用户点击后手动恢复全部规则。 */
+    /** 开机后待恢复：用户点击后手动恢复全部规则（单脚本批处理，按 UID 逐条汇报）。 */
     suspend fun restorePendingRules(): Result<Pair<Int, Int>> {
         val rules = ruleRepository.rulesFlow.first()
+        if (rules.isEmpty()) return Result.success(0 to 0)
+        val results = RuleApplier.applyAll(controller, rules.values.toList())
         var ok = 0
         var failed = 0
-        for ((_, rule) in rules) {
-            if (RuleApplier.apply(controller, rule).isSuccess) ok++ else failed++
+        for ((_, result) in results) {
+            if (result.isSuccess) ok++ else failed++
         }
         if (failed == 0) settingsRepository.setPendingRestore(false)
         return if (failed == 0) Result.success(ok to failed)

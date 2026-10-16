@@ -39,12 +39,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.limao.netcontrol.data.AppInfo
@@ -65,7 +65,6 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.limao.netcontrol.viewmodel.AppDetailViewModel
 import com.limao.netcontrol.viewmodel.AppListViewModel
 import com.limao.netcontrol.viewmodel.MainViewModel
-import com.limao.netcontrol.viewmodel.RulesViewModel
 import com.limao.netcontrol.viewmodel.SettingsViewModel
 import rikka.shizuku.Shizuku
 
@@ -91,16 +90,20 @@ class MainActivity : ComponentActivity() {
 
     private val mainViewModel: MainViewModel by viewModels { appVmFactory }
     private val appListViewModel: AppListViewModel by viewModels { appVmFactory }
-    private val rulesViewModel: RulesViewModel by viewModels { appVmFactory }
     private val settingsViewModel: SettingsViewModel by viewModels { appVmFactory }
 
+    // 上一次 Shizuku 授权轮询 Job：新授权结果到来时取消旧轮询，避免重叠
+    private var shizukuPollJob: Job? = null
+    // 上一次回到前台的轻量权限刷新 Job：下次恢复时取消，避免多个检测循环重叠
+    private var resumeDetectJob: Job? = null
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
             if (requestCode == SHIZUKU_REQUEST_CODE) {
                 if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     // 授权通过：轮询等系统同步完成，最多 5 次 x 500ms
                     Log.i(TAG, "shizuku granted, polling for auth state")
-                    lifecycleScope.launch {
+                    shizukuPollJob?.cancel()
+                    shizukuPollJob = lifecycleScope.launch {
                         repeat(5) { attempt ->
                             delay(500)
                             val authorized = try {
@@ -163,27 +166,31 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun NetControlRoot() {
-        // 问题1修复：回到前台自动重检权限（静默更新UI）
-        // 轮询 5 次 x 1 秒：撤销授权后系统同步有延迟，单次重检可能拿到旧值
+        // 回到前台时轻量刷新一次权限（不跑完整规则校验，不做 5 轮重检）。
+        // 撤销授权后系统同步有延迟，先等 500ms 再做一次检测；
+        // Job 保存下来，下次恢复/页面销毁时取消，避免多个检测循环重叠。
         val lifecycleOwner = LocalLifecycleOwner.current
         val firstResume = remember { mutableStateOf(true) }
+        // resume 检测 Job 存在组合作用域外（Activity 字段），跨重组保持可取消
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     if (firstResume.value) {
                         firstResume.value = false
                     } else {
-                        lifecycleScope.launch {
-                            repeat(5) {
-                                delay(1000)
-                                mainViewModel.redetect()
-                            }
+                        resumeDetectJob?.cancel()
+                        resumeDetectJob = lifecycleScope.launch {
+                            delay(500)
+                            mainViewModel.refreshPrivilege()
                         }
                     }
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
-            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                resumeDetectJob?.cancel()
+            }
         }
 
         val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle(initialValue = "system")
