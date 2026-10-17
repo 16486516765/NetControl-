@@ -36,6 +36,8 @@ abstract class IptablesController(
         /** 单 UID 应用脚本的最终验证通过标记（解析 stdout 用）。 */
         private const val APPLY_VERIFY_OK = "__APPLY_VERIFY_OK__"
         private const val APPLY_VERIFY_FAIL = "__APPLY_VERIFY_FAIL__"
+        /** 合法接口名：字母数字 + 下划线/点/横线，防止异常值破坏 Shell 脚本解析。 */
+        private val IFACE_NAME_REGEX = Regex("^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
     }
 
     // ------------------------------------------------------------------
@@ -101,32 +103,6 @@ abstract class IptablesController(
     private suspend fun ruleExists(bin: String, uid: Int, iface: String?): Boolean {
         val r = shell.exec("$bin -C OUTPUT ${ruleSpec(uid, iface)}")
         return r.success
-    }
-
-    private suspend fun addRule(bin: String, uid: Int, iface: String?): Boolean {
-        if (ruleExists(bin, uid, iface)) return true
-        val r = shell.exec("$bin -I OUTPUT ${ruleSpec(uid, iface)}")
-        if (!r.success) {
-            Log.e(logTag, "add rule failed ($bin uid=$uid iface=$iface): ${r.stderr}")
-            return false
-        }
-        val ok = ruleExists(bin, uid, iface)
-        if (!ok) Log.e(logTag, "rule verify failed after add ($bin uid=$uid iface=$iface)")
-        return ok
-    }
-
-    private suspend fun removeRule(bin: String, uid: Int, iface: String?): Boolean {
-        var guard = 0
-        while (ruleExists(bin, uid, iface) && guard++ < 10) {
-            val r = shell.exec("$bin -D OUTPUT ${ruleSpec(uid, iface)}")
-            if (!r.success) {
-                Log.e(logTag, "remove rule failed ($bin uid=$uid iface=$iface): ${r.stderr}")
-                return false
-            }
-        }
-        val ok = !ruleExists(bin, uid, iface)
-        if (!ok) Log.e(logTag, "rule still exists after remove ($bin uid=$uid iface=$iface)")
-        return ok
     }
 
     // ------------------------------------------------------------------
@@ -352,6 +328,9 @@ abstract class IptablesController(
             }
             ip6tablesBin?.let { bin6 ->
                 appendLine("for i in 1 2 3 4 5 6 7 8 9 10; do $bin6 -w -D OUTPUT -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done || true")
+                // P0-3：IPv6 分组规则也要按接口清理，旧逻辑只删了 IPv6 统一规则，
+                // IPv6 分组规则会残留成“幽灵限制”。
+                appendLine("for iface in \$(ls /sys/class/net 2>/dev/null); do for i in 1 2 3; do $bin6 -w -D OUTPUT -o \$iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done; done || true")
             }
         }
         val r = shell.exec(script, timeoutMs = 30000)
@@ -359,10 +338,16 @@ abstract class IptablesController(
             Log.e(logTag, "unblock script failed (uid=$uid): ${r.stderr}")
             return Result.failure(IllegalStateException("删除 iptables 规则失败（uid=$uid）"))
         }
-        // 批量验证
-        if (ruleExists(bins.first(), uid, null)) {
-            Log.e(logTag, "rule still exists after unblock (uid=$uid)")
-            return Result.failure(IllegalStateException("规则清理验证失败（uid=$uid）"))
+        // P0-3：全量核验——用 IPv4+IPv6 快照确认该 UID 已无任何残留规则，
+        // 而不是只检查 IPv4 统一规则。快照读取失败也视为核验失败，绝不谎报“已清理”。
+        val snapshot = getAllUidRules()
+        if (snapshot == null) {
+            Log.e(logTag, "unblock verify failed: snapshot unavailable (uid=$uid)")
+            return Result.failure(IllegalStateException("规则清理后无法核验（uid=$uid），请重试"))
+        }
+        if (snapshot[uid]?.hasAnyRule == true) {
+            Log.e(logTag, "rule still exists after unblock (uid=$uid): ${snapshot[uid]}")
+            return Result.failure(IllegalStateException("规则清理验证失败（uid=$uid），仍有残留规则"))
         }
         return Result.success(Unit)
     }
@@ -425,7 +410,13 @@ abstract class IptablesController(
         if (names == null) {
             return Result.failure(IllegalStateException("无法枚举网络接口"))
         }
-        val filtered = names.filter { it != "lo" && it.isNotBlank() }
+        // §5-5：接口名拼进 Shell 脚本前做格式校验，异常设备返回值不能破坏脚本解析。
+        // Kotlin 侧插值的接口名全部来自这里（detectTransports），在此处统一过滤即可；
+        // 脚本里 `ls /sys/class/net` 枚举的部分用 shell 变量展开，不经 Kotlin 插值，天然安全。
+        val filtered = names.filter { it != "lo" && it.isNotBlank() && IFACE_NAME_REGEX.matches(it) }
+        if (filtered.size != names.count { it != "lo" && it.isNotBlank() }) {
+            Log.w(logTag, "dropped invalid interface names: $names")
+        }
         val wifi = filtered.filter { n ->
             n.startsWith("wlan") || n.startsWith("wlx") || n == "wifi0"
         }
@@ -494,7 +485,27 @@ abstract class IptablesController(
             Log.e(logTag, "$label script failed (uid=$uid): ${r.stderr}")
             return Result.failure(IllegalStateException("$label 规则应用失败（uid=$uid）"))
         }
-        return Result.success(Unit)
+        // P1-1：逐条核验——脚本整体退出码为 0 不代表每条接口规则都生效
+        // （前面某条失败、最后一条成功时退出码仍为 0）。按接口逐个确认目标状态。
+        val bin = bins.first()
+        val mismatch = ifaces.filter { iface ->
+            ruleExists(bin, uid, iface) != blocked
+        }
+        if (mismatch.isEmpty()) return Result.success(Unit)
+        Log.e(logTag, "$label verify failed (uid=$uid): mismatch=$mismatch blocked=$blocked")
+        if (blocked) {
+            // 回滚：清理本次新加的分组规则，避免“部分生效”残留；
+            // 回滚本身尽力而为，结果不影响失败返回。
+            val rollback = buildString {
+                for (iface in ifaces) {
+                    appendLine("for i in 1 2 3; do $bin -w -D OUTPUT -o $iface -m owner --uid-owner $uid -j REJECT >/dev/null 2>&1 || break; done")
+                }
+            }
+            shell.exec(rollback, timeoutMs = 30000)
+        }
+        return Result.failure(
+            IllegalStateException("$label 规则核验失败（uid=$uid），接口 $mismatch 状态与预期不一致")
+        )
     }
 
     override suspend fun isWifiBlocked(uid: Int): Boolean {
@@ -513,36 +524,6 @@ abstract class IptablesController(
         return transports.mobileInterfaces.any { iface ->
             bins.any { ruleExists(it, uid, iface) }
         }
-    }
-
-    /**
-     * 一次 su 调用批量检查多个 UID 的统一禁止规则（IPv4 + IPv6 并集）。
-     * 200 个应用也只需一次 Shell 调用，列表加载不卡顿。
-     */
-    override suspend fun getBlockedUids(uids: List<Int>): Set<Int> {
-        if (uids.isEmpty()) return emptySet()
-        val bin = binsStrict().firstOrNull() ?: return emptySet()
-        // 注意 Kotlin 字符串中 $u 需转义为 \$u，留给 shell 展开
-        val script = "for u in ${uids.joinToString(" ")}; do " +
-            "$bin -w -C OUTPUT -m owner --uid-owner \$u -j REJECT >/dev/null 2>&1 && echo \$u; done"
-        val r = shell.exec(script, timeoutMs = 60000)
-        if (!r.success) {
-            Log.e(logTag, "batch check failed: ${r.stderr}")
-            return emptySet()
-        }
-        val result = r.stdout.lines().mapNotNull { it.trim().toIntOrNull() }.toMutableSet()
-        // IPv6：尽力合并，失败不影响 IPv4 结果
-        ip6tablesBin?.let { bin6 ->
-            val script6 = "for u in ${uids.joinToString(" ")}; do " +
-                "$bin6 -w -C OUTPUT -m owner --uid-owner \$u -j REJECT >/dev/null 2>&1 && echo \$u; done"
-            val r6 = shell.exec(script6, timeoutMs = 60000)
-            if (r6.success) {
-                result += r6.stdout.lines().mapNotNull { it.trim().toIntOrNull() }
-            } else {
-                Log.w(logTag, "batch check IPv6 failed: ${r6.stderr}")
-            }
-        }
-        return result
     }
 
     /**
