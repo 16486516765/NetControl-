@@ -26,6 +26,19 @@ enum class NetworkStatus {
     ERROR
 }
 
+/**
+ * 由一条 [UidRuleDetail] 推导联网状态（列表与详情页共用，避免两处重复逻辑漂移）。
+ * 调用方负责区分“快照读取失败”（UNKNOWN/ERROR）与“该 UID 无规则”（detail == null → ALLOWED）。
+ */
+fun statusOf(detail: UidRuleDetail?): NetworkStatus = when {
+    detail == null -> NetworkStatus.ALLOWED
+    detail.unifiedBlocked -> NetworkStatus.BLOCKED
+    detail.wifiBlockedOnly -> NetworkStatus.WIFI_ONLY_BLOCKED
+    detail.mobileBlockedOnly -> NetworkStatus.MOBILE_ONLY_BLOCKED
+    detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
+    else -> NetworkStatus.ALLOWED
+}
+
 /** 设备上的传输接口信息，用于判断是否可可靠区分 Wi-Fi / 移动数据。 */
 data class TransportInfo(
     val wifiInterfaces: List<String>,
@@ -68,13 +81,6 @@ interface NetworkController {
     suspend fun isWifiBlocked(uid: Int): Boolean
 
     suspend fun isMobileBlocked(uid: Int): Boolean
-
-    /**
-     * 批量查询一批 UID 是否被（统一规则）禁止联网。
-     * 用于应用列表一次性加载，避免逐个执行 su。
-     * 默认实现返回空集；IptablesController 提供真正的批量实现。
-     */
-    suspend fun getBlockedUids(uids: List<Int>): Set<Int> = emptySet()
 
     /**
      * 一次性读取全部 UID 的规则详情（统一/分组，IPv4 + IPv6 合并）。

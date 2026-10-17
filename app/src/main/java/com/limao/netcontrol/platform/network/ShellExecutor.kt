@@ -9,7 +9,9 @@ import rikka.shizuku.Shizuku
 data class ShellResult(
     val exitCode: Int,
     val stdout: String,
-    val stderr: String
+    val stderr: String,
+    /** 看门狗超时杀进程时为 true——调用方借此区分“命令失败”与“执行超时”。 */
+    val timedOut: Boolean = false
 ) {
     val success: Boolean get() = exitCode == 0
 }
@@ -27,6 +29,7 @@ interface ShellExecutor {
 internal fun execProcessRobust(process: Process, timeoutMs: Long): ShellResult {
     val stdoutBuilder = StringBuilder()
     val stderrBuilder = StringBuilder()
+    val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
     val outThread = Thread {
         try {
             process.inputStream.bufferedReader().forEachLine { stdoutBuilder.appendLine(it) }
@@ -42,11 +45,12 @@ internal fun execProcessRobust(process: Process, timeoutMs: Long): ShellResult {
     outThread.start()
     errThread.start()
 
-    // 看门狗：超时后强制杀进程
+    // 看门狗：超时后强制杀进程，并标记 timedOut，调用方能区分超时与失败
     val watchdog = Thread {
         try {
             Thread.sleep(timeoutMs)
             if (process.isAlive) {
+                timedOut.set(true)
                 try { process.destroyForcibly() } catch (_: Exception) {}
             }
         } catch (_: InterruptedException) {
@@ -61,8 +65,9 @@ internal fun execProcessRobust(process: Process, timeoutMs: Long): ShellResult {
         watchdog.interrupt()
         outThread.join(2000)
         errThread.join(2000)
-        // 如果是被看门狗杀的，waitFor 返回的可能是非 0，调用方按 exitCode 判断
-        ShellResult(code, stdoutBuilder.toString().trim(), stderrBuilder.toString().trim())
+        // 如果是被看门狗杀的，waitFor 返回的可能是非 0，调用方按 exitCode 判断；
+        // timedOut 告诉调用方这次是超时而非普通失败
+        ShellResult(code, stdoutBuilder.toString().trim(), stderrBuilder.toString().trim(), timedOut.get())
     } catch (e: InterruptedException) {
         try { process.destroyForcibly() } catch (_: Exception) {}
         ShellResult(-1, "", "interrupted: ${e.message}")

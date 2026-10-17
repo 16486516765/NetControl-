@@ -136,9 +136,13 @@ class NetControlSession(
             Log.w(TAG, "skip verify: rules snapshot unavailable")
             return
         }
+        // P1-7：UID 一次性取齐——应用列表缓存里已有 packageName -> uid 映射，
+        // 不再对每条规则单独查 PackageManager；缓存里没有的包才单独查一次
+        // （覆盖“列表未加载完”的边界，查不到即视为已卸载）。
+        val uidByPkg = appRepository.loadApps().associate { it.packageName to it.uid }
         for ((pkg, rule) in rules) {
             // 1. 应用已卸载 → 清理规则
-            val currentUid = appRepository.getUid(pkg)
+            val currentUid = uidByPkg[pkg] ?: appRepository.getUid(pkg)
             if (currentUid == null) {
                 ruleRepository.removeRule(pkg)
                 fixed++

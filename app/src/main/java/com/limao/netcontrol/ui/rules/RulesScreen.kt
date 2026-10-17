@@ -37,8 +37,7 @@ fun RulesScreen(
     onAppClick: (AppInfo) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val rows by listViewModel.rows.collectAsStateWithLifecycle()
-    val restricted = rows.filter { it.rule?.hasAnyRestriction == true }
+    val restricted by listViewModel.restrictedRows.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
