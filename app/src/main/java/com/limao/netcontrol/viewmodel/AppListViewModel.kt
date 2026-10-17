@@ -9,6 +9,7 @@ import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
 import com.limao.netcontrol.platform.network.NetworkStatus
 import com.limao.netcontrol.platform.network.RuleApplier
+import com.limao.netcontrol.platform.network.statusOf
 import com.limao.netcontrol.platform.network.UidRuleDetail
 import com.limao.netcontrol.platform.network.UnsupportedNetworkController
 import com.limao.netcontrol.repository.SettingsRepository
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -113,13 +115,7 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
             val status = when {
                 !privileged -> NetworkStatus.UNKNOWN
                 details == null -> NetworkStatus.UNKNOWN
-                detail == null -> NetworkStatus.ALLOWED
-                detail.unifiedBlocked -> NetworkStatus.BLOCKED
-                // 二、7 修复：与详情页一致，区分单向限制
-                detail.wifiBlockedOnly -> NetworkStatus.WIFI_ONLY_BLOCKED
-                detail.mobileBlockedOnly -> NetworkStatus.MOBILE_ONLY_BLOCKED
-                detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
-                else -> NetworkStatus.ALLOWED
+                else -> statusOf(detail)
             }
             searchable to status
         }
@@ -173,6 +169,14 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /**
+     * 规则页：仅保留有持久化限制的应用。
+     * 派生 StateFlow，避免 RulesScreen 每次重组都重新过滤整张列表。
+     */
+    val restrictedRows: StateFlow<List<AppRow>> = rows
+        .map { list -> list.filter { it.rule?.hasAnyRestriction == true } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     fun setSearchQuery(q: String) {
         _searchQuery.value = q
     }
@@ -199,13 +203,15 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 refreshStatuses()
+                // 仅成功加载后才标记 loaded；失败时保持 false，
+                // 否则下次 load() 直接跳过、用户无重试机会。
+                loaded = true
             } catch (e: Exception) {
                 Log.e(TAG, "load apps failed", e)
                 _loadError.value = e.message ?: "加载应用列表失败"
             } finally {
                 _isLoading.value = false
             }
-            loaded = true
         }
     }
 
@@ -256,19 +262,26 @@ class AppListViewModel(app: Application) : AndroidViewModel(app) {
                     _errors.value = _errors.value + (packageName to "未获得系统权限，无法控制网络")
                     return@launch
                 }
-                val current = rules.value[packageName]
-                val newRule = (current ?: NetworkRule(packageName, info.uid))
-                    .copy(uid = info.uid, blocked = blocked)
+                // P0-2：主列表总开关表达“全部允许 / 全部禁止”，
+                // 生成干净的新规则（清除 Wi-Fi / 移动数据分组限制）。
+                // 旧逻辑 copy 保留 wifiBlocked/mobileBlocked，导致主列表点“允许”
+                // 后 Wi-Fi 限制仍残留，与“解除全部限制”的语义不一致。
+                // 详情页的分组开关仍用独立草稿 + 立即应用流程，不受影响。
+                val newRule = NetworkRule(
+                    packageName = packageName,
+                    uid = info.uid,
+                    blocked = blocked
+                )
                 val result = RuleApplier.apply(controller, newRule)
                 if (result.isSuccess) {
                     ruleRepository.saveRule(newRule)
-                    // 本地更新该 UID 的状态，避免整表重查
+                    // 本地更新该 UID 的状态：干净规则对应系统里只有统一规则、
+                    // 无分组规则，避免整表重查
                     val cur = (_ruleDetails.value ?: emptyMap()).toMutableMap()
                     cur[info.uid] = UidRuleDetail(
                         uid = info.uid,
                         unifiedBlocked = blocked,
-                        ifaces = if (blocked) emptySet()
-                        else cur[info.uid]?.ifaces.orEmpty()
+                        ifaces = emptySet()
                     )
                     _ruleDetails.value = cur
                 } else {

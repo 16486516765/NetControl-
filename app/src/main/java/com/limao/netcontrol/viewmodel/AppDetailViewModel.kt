@@ -9,6 +9,7 @@ import com.limao.netcontrol.data.AppInfo
 import com.limao.netcontrol.data.NetworkRule
 import com.limao.netcontrol.platform.network.NetworkStatus
 import com.limao.netcontrol.platform.network.RuleApplier
+import com.limao.netcontrol.platform.network.statusOf
 import com.limao.netcontrol.platform.network.UnsupportedNetworkController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,14 +91,7 @@ class AppDetailViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val detail = snapshot[target.uid]
-                _actualStatus.value = when {
-                    detail == null -> NetworkStatus.ALLOWED
-                    detail.unifiedBlocked -> NetworkStatus.BLOCKED
-                    detail.wifiBlockedOnly -> NetworkStatus.WIFI_ONLY_BLOCKED
-                    detail.mobileBlockedOnly -> NetworkStatus.MOBILE_ONLY_BLOCKED
-                    detail.ifaces.isNotEmpty() -> NetworkStatus.BLOCKED
-                    else -> NetworkStatus.ALLOWED
-                }
+                _actualStatus.value = statusOf(detail)
                 // 任一 Wi-Fi/移动接口上有分组规则（不含统一规则，与旧 isWifiBlocked/isMobileBlocked 语义一致）
                 _actualWifiBlocked.value = detail?.wifiBlocked == true
                 _actualMobileBlocked.value = detail?.mobileBlocked == true
